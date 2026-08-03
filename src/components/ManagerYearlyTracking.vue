@@ -54,170 +54,109 @@
       </button>
     </div>
 
-    <!-- TIMELINE WINDOW -->
-    <div class="timeline-window-card">
-      <div class="timeline-window-header">
-        <div>
-          <h3 class="timeline-window-title">Timeline Window</h3>
-          <p class="timeline-window-help">
-            Adjust the visible timeline using the controls below.
-          </p>
-        </div>
-
-        <div class="timeline-window-summary">
-          <strong>{{ timelineWindowLabel }}</strong>
-          <span>{{ trackingYears.length }} year(s) visible</span>
-        </div>
-      </div>
-
-      <div class="timeline-window-controls">
-        <div class="timeline-control">
-          <div class="timeline-control-row">
-            <label for="timelineStart">Start Year</label>
-            <input
-              id="timelineStart"
-              type="number"
-              :min="timelineConfig.minYear"
-              :max="timelineConfig.maxYear"
-              v-model.number="timelineConfig.startYear"
-              @change="normalizeTimelineWindow('start')"
-            />
-          </div>
-          <input
-            type="range"
-            :min="timelineConfig.minYear"
-            :max="timelineConfig.maxYear"
-            step="1"
-            v-model.number="timelineConfig.startYear"
-            @input="normalizeTimelineWindow('start')"
-          />
-        </div>
-
-        <div class="timeline-control">
-          <div class="timeline-control-row">
-            <label for="timelineEnd">End Year</label>
-            <input
-              id="timelineEnd"
-              type="number"
-              :min="timelineConfig.minYear"
-              :max="timelineConfig.maxYear"
-              v-model.number="timelineConfig.endYear"
-              @change="normalizeTimelineWindow('end')"
-            />
-          </div>
-          <input
-            type="range"
-            :min="timelineConfig.minYear"
-            :max="timelineConfig.maxYear"
-            step="1"
-            v-model.number="timelineConfig.endYear"
-            @input="normalizeTimelineWindow('end')"
-          />
-        </div>
-
-        <div class="timeline-shortcuts">
-          <button type="button" class="timeline-shortcut-btn" @click="applyTimelineWindow(defaultTimelineStart, defaultTimelineEnd)">
-            Default
-          </button>
-          <button type="button" class="timeline-shortcut-btn" @click="applyTimelineWindow(2030, 2035)">
-            2030 - 2035
-          </button>
-          <button type="button" class="timeline-shortcut-btn" @click="applyTimelineWindow(currentYear, currentYear + 5)">
-            Current + 5
-          </button>
-          <button type="button" class="timeline-shortcut-btn" @click="applyTimelineWindow(timelineConfig.minYear, timelineConfig.maxYear)">
-            All Years
-          </button>
-        </div>
-      </div>
-
-      <div class="timeline-window-footer">
-        Visible years:
-        <span v-for="year in trackingYears" :key="year" class="year-chip">{{ year }}</span>
-      </div>
-    </div>
-
     <!-- ========================================== -->
-    <!-- TAB 1: ANALYTICS PLAYGROUND                -->
-    <!-- ========================================== -->
-    <div v-if="activeTab === 'analytics'" class="analytics-section">
-      <div class="dashboard-container" v-if="rows.length > 0">
-        <!-- Builder 1: Categorical Breakdown -->
-        <div class="chart-card">
-          <div class="chart-header">
-            <h3 class="chart-title">Categorical Breakdown</h3>
-            <div class="chart-controls">
-              <select v-model="catConfig.type" class="control-select">
-                <option value="donut">Donut Chart</option>
-                <option value="pie">Pie Chart</option>
-                <option value="bar">Bar Chart</option>
-              </select>
-              <select v-model="catConfig.groupBy" class="control-select">
-                <option value="currentPmoGate">By PMO Gate</option>
-                <option value="pillars">By Pillar</option>
-                <option value="sites">By Site</option>
-                <option value="aiAaAType">By AI Type</option>
-              </select>
-              <select v-model="catConfig.metric" class="control-select">
-                <option value="count">Project Count</option>
-                <option value="capacityGainValue">Total Capacity Gain</option>
-                <option value="yieldValue">Total Yield Value</option>
-              </select>
-            </div>
-          </div>
-          <div class="chart-body">
-            <apexchart
-              :type="catConfig.type"
-              height="350"
-              :options="computedCatOptions"
-              :series="computedCatSeries"
-            ></apexchart>
-          </div>
-        </div>
-
-        <!-- Builder 2: Yearly Financial Trend -->
-        <div class="chart-card combo-chart-card">
-          <div class="chart-header">
-            <h3 class="chart-title">Yearly Financial Trend</h3>
-            <div class="chart-controls">
-              <select v-model="trendConfig.type" class="control-select">
-                <option value="combo">Combo (Bar + Line)</option>
-                <option value="bar">Bar Chart Only</option>
-                <option value="line">Line Chart Only</option>
-              </select>
-              <select v-model="trendConfig.primaryMetric" class="control-select">
-                <option value="savings">Yearly Savings</option>
-                <option value="capacityGainValue">Capacity Gain</option>
-                <option value="yieldValue">Yield Value</option>
-              </select>
-              <select v-model="trendConfig.secondaryMetric" class="control-select" :disabled="trendConfig.type !== 'combo'">
-                <option value="none">-- No Secondary Metric --</option>
-                <option value="capacityGainValue">Capacity Gain</option>
-                <option value="yieldValue">Yield Value</option>
-                <option value="dlValue">DL Value</option>
-              </select>
-            </div>
-          </div>
-          <div class="chart-body">
-            <apexchart
-              :type="trendConfig.type === 'combo' ? 'line' : trendConfig.type"
-              height="350"
-              :options="computedTrendOptions"
-              :series="computedTrendSeries"
-            ></apexchart>
-          </div>
-        </div>
-      </div>
-
-      <div v-else class="no-data-message" style="margin: 40px; text-align: center;">
-        No project data available to analyze. Please add data in the Grid tab.
-      </div>
-    </div>
-
-    <!-- ========================================== -->
-    <!-- TAB 2: DATA ENTRY GRID                     -->
+    <!-- TAB 1: DATA ENTRY GRID                     -->
     <!-- ========================================== -->
     <div v-show="activeTab === 'grid'" class="grid-section">
+      <!-- TIMELINE WINDOW -->
+      <div class="timeline-window-card">
+        <div class="timeline-window-header">
+          <div>
+            <h3 class="timeline-window-title">Timeline Window</h3>
+            <p class="timeline-window-help">
+              Adjust the visible timeline using the controls below.
+            </p>
+          </div>
+
+          <div class="timeline-window-summary">
+            <strong>{{ timelineWindowLabel }}</strong>
+            <span>{{ trackingYears.length }} year(s) visible</span>
+          </div>
+        </div>
+
+        <div class="timeline-window-controls">
+          <div class="timeline-control">
+            <div class="timeline-control-row">
+              <label for="timelineStart">Start Year</label>
+              <input
+                id="timelineStart"
+                type="number"
+                :min="timelineConfig.minYear"
+                :max="timelineConfig.maxYear"
+                v-model.number="timelineConfig.startYear"
+                @change="normalizeTimelineWindow('start')"
+              />
+            </div>
+            <input
+              type="range"
+              :min="timelineConfig.minYear"
+              :max="timelineConfig.maxYear"
+              step="1"
+              v-model.number="timelineConfig.startYear"
+              @input="normalizeTimelineWindow('start')"
+            />
+          </div>
+
+          <div class="timeline-control">
+            <div class="timeline-control-row">
+              <label for="timelineEnd">End Year</label>
+              <input
+                id="timelineEnd"
+                type="number"
+                :min="timelineConfig.minYear"
+                :max="timelineConfig.maxYear"
+                v-model.number="timelineConfig.endYear"
+                @change="normalizeTimelineWindow('end')"
+              />
+            </div>
+            <input
+              type="range"
+              :min="timelineConfig.minYear"
+              :max="timelineConfig.maxYear"
+              step="1"
+              v-model.number="timelineConfig.endYear"
+              @input="normalizeTimelineWindow('end')"
+            />
+          </div>
+
+          <div class="timeline-shortcuts">
+            <button
+              type="button"
+              class="timeline-shortcut-btn"
+              @click="applyTimelineWindow(defaultTimelineStart, defaultTimelineEnd)"
+            >
+              Default
+            </button>
+            <button
+              type="button"
+              class="timeline-shortcut-btn"
+              @click="applyTimelineWindow(2030, 2035)"
+            >
+              2030 - 2035
+            </button>
+            <button
+              type="button"
+              class="timeline-shortcut-btn"
+              @click="applyTimelineWindow(currentYear, currentYear + 5)"
+            >
+              Current + 5
+            </button>
+            <button
+              type="button"
+              class="timeline-shortcut-btn"
+              @click="applyTimelineWindow(timelineConfig.minYear, timelineConfig.maxYear)"
+            >
+              All Years
+            </button>
+          </div>
+        </div>
+
+        <div class="timeline-window-footer">
+          Visible years:
+          <span v-for="year in trackingYears" :key="year" class="year-chip">{{ year }}</span>
+        </div>
+      </div>
+
       <!-- INLINE FILTERS BAR -->
       <div class="filters-bar">
         <div class="filter-group">
@@ -326,22 +265,30 @@
 
       <!-- ACTION BUTTONS -->
       <div class="actions">
-        <!-- CRUD Actions -->
         <button class="primary-btn" @click="openAddForm" :disabled="isProcessing || isPageLoading">Add</button>
-        <button class="primary-btn" @click="openUpdateForm" :disabled="isProcessing || isPageLoading || !selectedRow">Update</button>
+        <button class="primary-btn" @click="openUpdateForm" :disabled="isProcessing || isPageLoading || !selectedRow">
+          Update
+        </button>
 
-        <!-- Audit Actions -->
         <div class="divider"></div>
-        <button class="view-btn" @click="openHistoryModal" :disabled="isProcessing || isPageLoading || !selectedRow">View History</button>
-        <button class="view-btn" v-if="isAdmin" @click="openGlobalHistoryModal" :disabled="isProcessing || isPageLoading">Global Audit Log</button>
+        <button class="view-btn" @click="openHistoryModal" :disabled="isProcessing || isPageLoading || !selectedRow">
+          View History
+        </button>
+        <button class="view-btn" v-if="isAdmin" @click="openGlobalHistoryModal" :disabled="isProcessing || isPageLoading">
+          Global Audit Log
+        </button>
 
-        <!-- Preset View Toggles -->
         <div class="divider"></div>
-        <button @click="setFinancialView" :disabled="isProcessing || isPageLoading" class="view-btn">Financial View</button>
-        <button @click="setGlobalView" :disabled="isProcessing || isPageLoading" class="view-btn">Global View</button>
-        <button @click="showColumnManager = true" :disabled="isProcessing || isPageLoading" class="view-btn">Custom Columns</button>
+        <button @click="setFinancialView" :disabled="isProcessing || isPageLoading" class="view-btn">
+          Financial View
+        </button>
+        <button @click="setGlobalView" :disabled="isProcessing || isPageLoading" class="view-btn">
+          Global View
+        </button>
+        <button @click="showColumnManager = true" :disabled="isProcessing || isPageLoading" class="view-btn">
+          Custom Columns
+        </button>
 
-        <!-- Tools -->
         <div class="divider"></div>
         <button @click="clearTableUI" :disabled="isProcessing || isPageLoading">Clear Selection</button>
       </div>
@@ -359,6 +306,100 @@
           <div><strong>AI/AA/A Type:</strong> {{ selectedRow.aiAaAType || '-' }}</div>
           <div><strong>FOAK/NOAK:</strong> {{ selectedRow.foakNoak || '-' }}</div>
         </div>
+      </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 2: ANALYTICS                           -->
+    <!-- ========================================== -->
+    <div v-if="activeTab === 'analytics'" class="analytics-section">
+      <div v-if="rows.length > 0" class="analytics-layout">
+        <!-- TOP COMBO GRAPH -->
+        <div class="chart-card wide-chart-card">
+          <div class="chart-header">
+            <h3 class="chart-title">Site Yearly Value vs Expected Value</h3>
+            <div class="chart-controls">
+              <select v-model="siteTrendConfig.selectedSite" class="control-select">
+                <option value="ALL">All Sites (Combined)</option>
+                <option v-for="site in analyticsSiteOptions" :key="site" :value="site">
+                  {{ site }}
+                </option>
+              </select>
+            </div>
+          </div>
+
+          <div class="chart-body">
+            <apexchart
+              type="line"
+              height="360"
+              :options="siteTrendOptions"
+              :series="siteTrendSeries"
+            ></apexchart>
+          </div>
+        </div>
+
+        <!-- 4 PIE CHARTS -->
+        <div class="piecharts-section">
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3 class="chart-title">DTIT Involved</h3>
+            </div>
+            <div class="chart-body">
+              <apexchart
+                type="pie"
+                height="320"
+                :options="dtitPieOptions"
+                :series="dtitPieSeries"
+              ></apexchart>
+            </div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3 class="chart-title">FOAK / NOAK</h3>
+            </div>
+            <div class="chart-body">
+              <apexchart
+                type="pie"
+                height="320"
+                :options="foakPieOptions"
+                :series="foakPieSeries"
+              ></apexchart>
+            </div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3 class="chart-title">Pillars</h3>
+            </div>
+            <div class="chart-body">
+              <apexchart
+                type="pie"
+                height="320"
+                :options="pillarPieOptions"
+                :series="pillarPieSeries"
+              ></apexchart>
+            </div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3 class="chart-title">KPI Breakdown</h3>
+            </div>
+            <div class="chart-body">
+              <apexchart
+                type="pie"
+                height="320"
+                :options="kpiPieOptions"
+                :series="kpiPieSeries"
+              ></apexchart>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-else class="no-data-message" style="margin: 40px; text-align: center;">
+        No project data available to analyze. Please add data in the Grid tab.
       </div>
     </div>
 
@@ -703,6 +744,11 @@ export default {
         endYear: currentYear + 4
       },
 
+      // Analytics site chart filter
+      siteTrendConfig: {
+        selectedSite: 'ALL'
+      },
+
       // Global Page State
       activeTab: 'grid',
       isProcessing: false,
@@ -731,6 +777,7 @@ export default {
 
       // Columns / Table refresh control
       tableColumns: [],
+      hiddenColumns: {},
       tableViewVersion: 0,
 
       // Inline Filters
@@ -748,20 +795,8 @@ export default {
       addForm: {},
       updateForm: {},
 
-      // --- ANALYTICS BUILDER CONFIGURATION ---
-      catConfig: {
-        type: 'donut',
-        groupBy: 'currentPmoGate',
-        metric: 'count'
-      },
-      trendConfig: {
-        type: 'combo',
-        primaryMetric: 'savings',
-        secondaryMetric: 'capacityGainValue'
-      },
-
-      // Base Chart Configurations
-      baseColors: ['#1f5fa8', '#28a745', '#ffd600', '#d93025', '#17a2b8', '#6c757d']
+      // Static chart colors
+      pieColors: ['#1f5fa8', '#28a745', '#ffd600', '#d93025', '#17a2b8', '#6c757d', '#6f42c1', '#fd7e14']
     };
   },
   computed: {
@@ -826,116 +861,138 @@ export default {
     },
 
     // ==========================================
-    // DYNAMIC CHART: Categorical Breakdown
+    // TOP SITE CHART
     // ==========================================
-    computedCatData() {
-      const dataMap = {};
-      this.rows.forEach(row => {
-        const groupKey =
-          row[this.catConfig.groupBy] && String(row[this.catConfig.groupBy]).trim() !== ''
-            ? row[this.catConfig.groupBy]
-            : 'Unassigned';
+    analyticsSiteOptions() {
+      return [...new Set(this.rows.map(r => r.sites).filter(Boolean))].sort();
+    },
+    filteredSiteTrendRows() {
+      if (this.siteTrendConfig.selectedSite === 'ALL') {
+        return this.rows;
+      }
+      return this.rows.filter(r => r.sites === this.siteTrendConfig.selectedSite);
+    },
+    siteTrendData() {
+      const labels = this.trackingYears.map(year => this.formatFiscalYearLabel(year));
+      const rows = this.filteredSiteTrendRows;
 
-        let valToAdd = 0;
-        if (this.catConfig.metric === 'count') {
-          valToAdd = 1;
-        } else {
-          valToAdd = Number(row[this.catConfig.metric]) || 0;
-        }
+      const actual = this.trackingYears.map(year => {
+        const total = rows.reduce((sum, row) => sum + (Number(row[`year${year}`]) || 0), 0);
+        return Number((total / 1000000).toFixed(3));
+      });
 
-        dataMap[groupKey] = (dataMap[groupKey] || 0) + valToAdd;
+      const expected = actual.map((value, index) => {
+        const dummyFactor = 1.08 + (index * 0.02);
+        return Number((value * dummyFactor).toFixed(3));
       });
 
       return {
-        labels: Object.keys(dataMap),
-        values: Object.values(dataMap)
+        labels,
+        actual,
+        expected
       };
     },
-    computedCatOptions() {
+    siteTrendOptions() {
       return {
-        chart: { fontFamily: 'Arial, sans-serif' },
-        labels: this.computedCatData.labels,
-        colors: this.baseColors,
-        xaxis: { categories: this.computedCatData.labels },
-        plotOptions: {
-          pie: {
-            donut: {
-              size: '65%',
-              labels: { show: true, value: { show: true, fontSize: '20px', fontWeight: 'bold' } }
-            }
+        chart: {
+          fontFamily: 'Arial, sans-serif',
+          toolbar: { show: false },
+          animations: { enabled: false }
+        },
+        colors: ['#1f5fa8', '#d93025'],
+        xaxis: {
+          categories: this.siteTrendData.labels,
+          title: { text: 'Fiscal Year' }
+        },
+        yaxis: {
+          title: { text: 'Value (Millions)' },
+          labels: {
+            formatter: value => `${Number(value).toFixed(1)}M`
           }
         },
-        dataLabels: { enabled: this.catConfig.type !== 'bar' },
-        legend: { position: 'bottom' }
-      };
-    },
-    computedCatSeries() {
-      if (this.catConfig.type === 'bar') {
-        return [{ name: this.catConfig.metric, data: this.computedCatData.values }];
-      }
-      return this.computedCatData.values;
-    },
-
-    // ==========================================
-    // DYNAMIC CHART: Yearly Financial Trend
-    // ==========================================
-    computedTrendOptions() {
-      return {
-        chart: { fontFamily: 'Arial, sans-serif', toolbar: { show: false } },
-        colors: ['#1f5fa8', '#d93025'],
-        xaxis: { categories: this.trackingYears.map(String) },
-        stroke: { width: this.trendConfig.type === 'combo' ? [0, 4] : [4] },
-        yaxis: [
-          {
-            title: { text: this.trendConfig.primaryMetric },
-            labels: { formatter: value => '$' + Number(value || 0).toLocaleString() }
-          },
-          ...(this.trendConfig.secondaryMetric !== 'none' && this.trendConfig.type === 'combo'
-            ? [
-                {
-                  opposite: true,
-                  title: { text: this.trendConfig.secondaryMetric },
-                  labels: { formatter: value => '$' + Number(value || 0).toLocaleString() }
-                }
-              ]
-            : [])
-        ],
-        legend: { position: 'top' },
-        tooltip: { y: { formatter: value => '$' + Number(value || 0).toLocaleString() } }
-      };
-    },
-    computedTrendSeries() {
-      const primaryData = this.trackingYears.map(year => {
-        if (this.trendConfig.primaryMetric === 'savings') {
-          return this.rows.reduce((sum, row) => sum + (Number(row[`year${year}`]) || 0), 0);
-        } else {
-          const baseTotal = this.rows.reduce((sum, row) => sum + (Number(row[this.trendConfig.primaryMetric]) || 0), 0);
-          return baseTotal * (this.trackingYears.indexOf(year) + 1) * 0.2;
+        stroke: {
+          width: [0, 4],
+          curve: 'smooth'
+        },
+        plotOptions: {
+          bar: {
+            columnWidth: '45%',
+            borderRadius: 4
+          }
+        },
+        dataLabels: {
+          enabled: false
+        },
+        legend: {
+          position: 'top'
+        },
+        tooltip: {
+          shared: true,
+          intersect: false,
+          y: {
+            formatter: value => `${Number(value).toFixed(1)}M`
+          }
+        },
+        noData: {
+          text: 'No site data available'
         }
-      });
-
-      const series = [
+      };
+    },
+    siteTrendSeries() {
+      return [
         {
-          name: this.trendConfig.primaryMetric,
-          type: this.trendConfig.type === 'combo' ? 'column' : this.trendConfig.type,
-          data: primaryData
+          name: 'Actual Value',
+          type: 'column',
+          data: this.siteTrendData.actual
+        },
+        {
+          name: 'Expected Value (Dummy)',
+          type: 'line',
+          data: this.siteTrendData.expected
         }
       ];
+    },
 
-      if (this.trendConfig.type === 'combo' && this.trendConfig.secondaryMetric !== 'none') {
-        const secondaryData = this.trackingYears.map(year => {
-          const baseTotal = this.rows.reduce((sum, row) => sum + (Number(row[this.trendConfig.secondaryMetric]) || 0), 0);
-          return baseTotal * (this.trackingYears.indexOf(year) + 1) * 0.15;
-        });
+    // ==========================================
+    // STATIC PIE CHARTS
+    // ==========================================
+    dtitPieData() {
+      return this.buildCountPieData('dtitInvolved');
+    },
+    foakPieData() {
+      return this.buildCountPieData('foakNoak');
+    },
+    pillarPieData() {
+      return this.buildCountPieData('pillars');
+    },
+    kpiPieData() {
+      return this.buildKpiPieData();
+    },
 
-        series.push({
-          name: this.trendConfig.secondaryMetric,
-          type: 'line',
-          data: secondaryData
-        });
-      }
+    dtitPieOptions() {
+      return this.buildPieOptions('DTIT Involved', this.dtitPieData.labels);
+    },
+    foakPieOptions() {
+      return this.buildPieOptions('FOAK / NOAK', this.foakPieData.labels);
+    },
+    pillarPieOptions() {
+      return this.buildPieOptions('Pillars', this.pillarPieData.labels);
+    },
+    kpiPieOptions() {
+      return this.buildPieOptions('KPI Breakdown', this.kpiPieData.labels);
+    },
 
-      return series;
+    dtitPieSeries() {
+      return this.dtitPieData.values;
+    },
+    foakPieSeries() {
+      return this.foakPieData.values;
+    },
+    pillarPieSeries() {
+      return this.pillarPieData.values;
+    },
+    kpiPieSeries() {
+      return this.kpiPieData.values;
     }
   },
   created() {
@@ -981,7 +1038,6 @@ export default {
 
       this.timelineConfig.startYear = start;
       this.timelineConfig.endYear = end;
-
       this.syncTimelineDependentState();
     },
 
@@ -1003,6 +1059,12 @@ export default {
       }
 
       this.cancelInlineEdit();
+    },
+
+    formatFiscalYearLabel(year) {
+      const start = String(year % 100).padStart(2, '0');
+      const end = String((year + 1) % 100).padStart(2, '0');
+      return `FY${start}/${end}`;
     },
 
     buildTimelineForm(base = {}, pruneOldYears = false) {
@@ -1028,70 +1090,101 @@ export default {
     },
 
     // -------------------------------------------------
-    // COLUMN DEFINITIONS
+    // STATIC PIE CHART HELPERS
     // -------------------------------------------------
-    baseColumnDefs() {
-      return [
-        { label: 'Project Name', field: 'projectName', type: 'text', fixed: true, width: '180px', hidden: false },
-        { label: 'Project ID', field: 'projectId', type: 'text', width: '120px', hidden: true },
-        { label: 'Pillars', field: 'pillars', type: 'text', width: '150px', hidden: true },
-        { label: 'Sites', field: 'sites', type: 'text', width: '150px', hidden: true },
-        { label: 'PMO Gate', field: 'currentPmoGate', type: 'text', width: '120px', hidden: true },
-        { label: 'DTIT Involved', field: 'dtitInvolved', type: 'text', width: '120px', hidden: true },
-        { label: 'AI/AA/A Type', field: 'aiAaAType', type: 'text', width: '120px', hidden: true },
-        { label: 'FOAK/NOAK', field: 'foakNoak', type: 'text', width: '120px', hidden: true }
-      ];
+    normalizePieLabel(value) {
+      if (value === null || value === undefined || String(value).trim() === '') {
+        return 'Unassigned';
+      }
+      return String(value).trim();
     },
 
-    yearColumnDefs() {
-      return this.trackingYears.map(year => ({
-        label: String(year),
-        field: 'year' + year,
-        type: 'number',
-        formatType: 'currency',
-        width: '120px',
-        hidden: false
-      }));
-    },
+    buildCountPieData(field) {
+      const map = {};
 
-    kpiColumnDefs() {
-      return [
-        { label: 'Comment', field: 'comment', type: 'text', width: '200px', hidden: false },
-        { label: 'Capacity Gain Val', field: 'capacityGainValue', type: 'number', formatType: 'currency', width: '140px', hidden: false },
-        { label: 'Capacity Gain %', field: 'capacityGainPercent', type: 'number', formatType: 'percent', width: '130px', hidden: false },
-        { label: 'DL Value', field: 'dlValue', type: 'number', formatType: 'currency', width: '120px', hidden: false },
-        { label: 'DL Equivalent', field: 'dlEquivalent', type: 'number', width: '120px', hidden: false },
-        { label: 'IDL Value', field: 'idlValue', type: 'number', formatType: 'currency', width: '120px', hidden: false },
-        { label: 'IDL FTE', field: 'idlFte', type: 'number', width: '100px', hidden: false },
-        { label: 'Yield Value', field: 'yieldValue', type: 'number', formatType: 'currency', width: '120px', hidden: false },
-        { label: 'Yield (%) Gain', field: 'yieldPercentGain', type: 'number', formatType: 'percent', width: '120px', hidden: false },
-        { label: 'Quality Value', field: 'qualityValue', type: 'number', formatType: 'currency', width: '120px', hidden: false },
-        { label: 'Quality Cases', field: 'qualityCases', type: 'number', width: '120px', hidden: false }
-      ];
-    },
-
-    allColumnDefs() {
-      return [
-        ...this.baseColumnDefs(),
-        ...this.yearColumnDefs(),
-        ...this.kpiColumnDefs()
-      ];
-    },
-
-    rebuildTableColumns() {
-      const previousHiddenMap = {};
-      this.tableColumns.forEach(col => {
-        previousHiddenMap[col.field] = col.hidden;
+      this.rows.forEach(row => {
+        const key = this.normalizePieLabel(row[field]);
+        map[key] = (map[key] || 0) + 1;
       });
 
-      this.tableColumns = this.allColumnDefs().map(col => ({
-        ...col,
-        hidden: Object.prototype.hasOwnProperty.call(previousHiddenMap, col.field)
-          ? previousHiddenMap[col.field]
-          : col.hidden
-      }));
+      const sortedEntries = Object.entries(map).sort((a, b) => b[1] - a[1]);
 
-      this.tableViewVersion++;
+      return {
+        labels: sortedEntries.map(([label]) => label),
+        values: sortedEntries.map(([, value]) => value)
+      };
+    },
+
+    buildKpiPieData() {
+      const metrics = [
+        { label: 'Capacity Gain Value', field: 'capacityGainValue' },
+        { label: 'DL Value', field: 'dlValue' },
+        { label: 'IDL Value', field: 'idlValue' },
+        { label: 'Yield Value', field: 'yieldValue' },
+        { label: 'Quality Value', field: 'qualityValue' },
+        { label: 'Quality Cases', field: 'qualityCases' },
+        { label: 'IDL FTE', field: 'idlFte' }
+      ];
+
+      return {
+        labels: metrics.map(m => m.label),
+        values: metrics.map(m => {
+          return this.rows.reduce((sum, row) => sum + (Number(row[m.field]) || 0), 0);
+        })
+      };
+    },
+
+    buildPieOptions(title, labels) {
+      return {
+        chart: {
+          type: 'pie',
+          fontFamily: 'Arial, sans-serif',
+          toolbar: { show: false },
+          animations: { enabled: false }
+        },
+        labels,
+        colors: this.pieColors,
+        legend: {
+          position: 'bottom',
+          onItemClick: {
+            toggleDataSeries: false
+          },
+          onItemHover: {
+            highlightDataSeries: false
+          }
+        },
+        dataLabels: {
+          enabled: true,
+          formatter: val => `${Number(val).toFixed(1)}%`
+        },
+        tooltip: {
+          enabled: false
+        },
+        stroke: {
+          width: 1,
+          colors: ['#ffffff']
+        },
+        plotOptions: {
+          pie: {
+            expandOnClick: false
+          }
+        },
+        states: {
+          hover: {
+            filter: {
+              type: 'none'
+            }
+          },
+          active: {
+            filter: {
+              type: 'none'
+            }
+          }
+        },
+        noData: {
+          text: `No data for ${title}`
+        }
+      };
     },
 
     // -------------------------------------------------
@@ -1151,6 +1244,71 @@ export default {
     },
 
     // -------------------------------------------------
+    // COLUMN DEFINITIONS
+    // -------------------------------------------------
+    baseColumnDefs() {
+      return [
+        { label: 'Project Name', field: 'projectName', type: 'text', fixed: true, width: '180px', hidden: false },
+        { label: 'Project ID', field: 'projectId', type: 'text', width: '120px', hidden: true },
+        { label: 'Pillars', field: 'pillars', type: 'text', width: '150px', hidden: true },
+        { label: 'Sites', field: 'sites', type: 'text', width: '150px', hidden: true },
+        { label: 'PMO Gate', field: 'currentPmoGate', type: 'text', width: '120px', hidden: true },
+        { label: 'DTIT Involved', field: 'dtitInvolved', type: 'text', width: '120px', hidden: true },
+        { label: 'AI/AA/A Type', field: 'aiAaAType', type: 'text', width: '120px', hidden: true },
+        { label: 'FOAK/NOAK', field: 'foakNoak', type: 'text', width: '120px', hidden: true }
+      ];
+    },
+
+    yearColumnDefs() {
+      return this.trackingYears.map(year => ({
+        label: String(year),
+        field: 'year' + year,
+        type: 'number',
+        formatType: 'currency',
+        width: '120px',
+        hidden: false
+      }));
+    },
+
+    kpiColumnDefs() {
+      return [
+        { label: 'Comment', field: 'comment', type: 'text', width: '200px', hidden: false },
+        { label: 'Capacity Gain Val', field: 'capacityGainValue', type: 'number', formatType: 'currency', width: '140px', hidden: false },
+        { label: 'Capacity Gain %', field: 'capacityGainPercent', type: 'number', formatType: 'percent', width: '130px', hidden: false },
+        { label: 'DL Value', field: 'dlValue', type: 'number', formatType: 'currency', width: '120px', hidden: false },
+        { label: 'DL Equivalent', field: 'dlEquivalent', type: 'number', width: '120px', hidden: false },
+        { label: 'IDL Value', field: 'idlValue', type: 'number', formatType: 'currency', width: '120px', hidden: false },
+        { label: 'IDL FTE', field: 'idlFte', type: 'number', width: '100px', hidden: false },
+        { label: 'Yield Value', field: 'yieldValue', type: 'number', formatType: 'currency', width: '120px', hidden: false },
+        { label: 'Yield (%) Gain', field: 'yieldPercentGain', type: 'number', formatType: 'percent', width: '120px', hidden: false },
+        { label: 'Quality Value', field: 'qualityValue', type: 'number', formatType: 'currency', width: '120px', hidden: false },
+        { label: 'Quality Cases', field: 'qualityCases', type: 'number', width: '120px', hidden: false }
+      ];
+    },
+
+    allColumnDefs() {
+      return [
+        ...this.baseColumnDefs(),
+        ...this.yearColumnDefs(),
+        ...this.kpiColumnDefs()
+      ];
+    },
+
+    isColumnHidden(field, defaultHidden = false) {
+      return Object.prototype.hasOwnProperty.call(this.hiddenColumns, field)
+        ? this.hiddenColumns[field]
+        : defaultHidden;
+    },
+
+    rebuildTableColumns() {
+      this.tableColumns = this.allColumnDefs().map(col => ({
+        ...col,
+        hidden: this.isColumnHidden(col.field, col.hidden || false)
+      }));
+      this.tableViewVersion++;
+    },
+
+    // -------------------------------------------------
     // PRESET VIEWS
     // -------------------------------------------------
     setFinancialView() {
@@ -1171,21 +1329,21 @@ export default {
         'qualityCases'
       ]);
 
-      this.tableColumns = this.allColumnDefs().map(col => ({
-        ...col,
-        hidden: !financialFields.has(col.field)
-      }));
+      this.hiddenColumns = {};
+      this.allColumnDefs().forEach(col => {
+        this.hiddenColumns[col.field] = !financialFields.has(col.field);
+      });
 
-      this.tableViewVersion++;
+      this.rebuildTableColumns();
     },
 
     setGlobalView() {
-      this.tableColumns = this.allColumnDefs().map(col => ({
-        ...col,
-        hidden: false
-      }));
+      this.hiddenColumns = {};
+      this.allColumnDefs().forEach(col => {
+        this.hiddenColumns[col.field] = false;
+      });
 
-      this.tableViewVersion++;
+      this.rebuildTableColumns();
     },
 
     // -------------------------------------------------
@@ -1206,14 +1364,8 @@ export default {
     // COLUMN VISIBILITY
     // -------------------------------------------------
     toggleColumnVisibility(col) {
-      this.tableColumns = this.tableColumns.map(c => {
-        if (c.field === col.field) {
-          return { ...c, hidden: !c.hidden };
-        }
-        return c;
-      });
-
-      this.tableViewVersion++;
+      this.hiddenColumns[col.field] = !this.isColumnHidden(col.field, col.hidden || false);
+      this.rebuildTableColumns();
     },
 
     // -------------------------------------------------
@@ -1481,6 +1633,7 @@ export default {
     },
     openUpdateForm() {
       if (!this.selectedRow) return alert('Please select a row to update.');
+
       this.updateForm = this.buildTimelineForm({ ...this.selectedRow }, false);
       this.showUpdateForm = true;
       this.showAddForm = false;
@@ -1583,7 +1736,10 @@ export default {
   align-items: center;
   gap: 12px;
 }
-.home-btn, .logout-btn, .back-btn, .spotfire-btn {
+.home-btn,
+.logout-btn,
+.back-btn,
+.spotfire-btn {
   background: none;
   color: #fff;
   border: 2px solid #fff;
@@ -1594,7 +1750,10 @@ export default {
   padding: 8px 24px;
   transition: background 0.2s, color 0.2s, border 0.2s;
 }
-.home-btn:hover, .logout-btn:hover, .back-btn:hover, .spotfire-btn:hover {
+.home-btn:hover,
+.logout-btn:hover,
+.back-btn:hover,
+.spotfire-btn:hover {
   background: #ffd600;
   color: #07254a;
   border-color: #ffd600;
@@ -1729,13 +1888,21 @@ export default {
   font-weight: 600;
 }
 
-/* Dashboard Chart Section */
+/* Analytics */
 .analytics-section {
   padding: 20px;
 }
-.dashboard-container {
+.analytics-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.wide-chart-card {
+  width: 100%;
+}
+.piecharts-section {
   display: grid;
-  grid-template-columns: 1fr 2fr;
+  grid-template-columns: repeat(2, minmax(320px, 1fr));
   gap: 20px;
 }
 .chart-card {
@@ -1761,6 +1928,7 @@ export default {
 .chart-controls {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 .control-select {
   padding: 6px 12px;
@@ -1770,6 +1938,9 @@ export default {
   background-color: #f8f9fb;
   color: #07254a;
   font-weight: 600;
+}
+.chart-body {
+  min-height: 320px;
 }
 
 /* Layout Elements */
@@ -1937,7 +2108,8 @@ export default {
   color: #1f3b64;
   font-size: 0.9rem;
 }
-.form-group input, .form-group select {
+.form-group input,
+.form-group select {
   width: 100%;
   box-sizing: border-box;
   padding: 8px;
@@ -1945,7 +2117,8 @@ export default {
   border-radius: 4px;
   background-color: white;
 }
-.form-group input:disabled, .form-group select:disabled {
+.form-group input:disabled,
+.form-group select:disabled {
   background-color: #f1f3f5;
   color: #6c757d;
   cursor: not-allowed;
@@ -2164,14 +2337,20 @@ export default {
   animation: slidebar 1.1s infinite ease-in-out;
 }
 @keyframes slidebar {
-  0% { transform: translateX(-120%); }
-  50% { transform: translateX(80%); }
-  100% { transform: translateX(260%); }
+  0% {
+    transform: translateX(-120%);
+  }
+  50% {
+    transform: translateX(80%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
 }
 
 /* Responsive Enhancements */
 @media (max-width: 1100px) {
-  .dashboard-container {
+  .piecharts-section {
     grid-template-columns: 1fr;
   }
 
