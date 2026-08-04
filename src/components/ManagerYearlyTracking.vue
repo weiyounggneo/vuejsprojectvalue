@@ -455,17 +455,30 @@
 
             <div class="form-group">
               <label for="dtitInvolved">DTIT Involved</label>
-              <input id="dtitInvolved" type="text" v-model="activeForm.dtitInvolved" :disabled="isProcessing" />
+              <select id="dtitInvolved" v-model="activeForm.dtitInvolved" :disabled="isProcessing">
+                <option value="">(Blank)</option>
+                <option value="Yes">Yes</option>
+                <option value="No">No</option>
+              </select>
             </div>
 
             <div class="form-group">
               <label for="aiAaAType">AI/AA/A type</label>
-              <input id="aiAaAType" type="text" v-model="activeForm.aiAaAType" :disabled="isProcessing" />
+              <select id="aiAaAType" v-model="activeForm.aiAaAType" :disabled="isProcessing">
+                <option value="">(Blank)</option>
+                <option value="AI">AI</option>
+                <option value="AA">AA</option>
+                <option value="A">A</option>
+              </select>
             </div>
 
             <div class="form-group">
               <label for="foakNoak">FOAK/NOAK</label>
-              <input id="foakNoak" type="text" v-model="activeForm.foakNoak" :disabled="isProcessing" />
+              <select id="foakNoak" v-model="activeForm.foakNoak" :disabled="isProcessing">
+                <option value="">(Blank)</option>
+                <option value="FOAK">FOAK</option>
+                <option value="NOAK">NOAK</option>
+              </select>
             </div>
           </div>
 
@@ -557,7 +570,7 @@
 
     <!-- ROW-LEVEL HISTORY MODAL -->
     <div v-if="showHistoryModal" class="modal-overlay">
-      <div class="modal large-modal">
+      <div class="modal x-large-modal">
         <h3>Version History: {{ selectedRow?.projectName }}</h3>
 
         <div v-if="isFetchingHistory" style="text-align: center; padding: 20px;">
@@ -572,10 +585,17 @@
                 <th>Date Changed</th>
                 <th>Changed By</th>
                 <th>Status</th>
-                <th>Capacity Impr.</th>
-                <th>Yield Value</th>
-                <th>DL Value</th>
-                <th>Quality Value</th>
+                <th>Comment</th>
+                <th>Cap. Gain Val</th>
+                <th>Cap. Gain %</th>
+                <th>DL Val</th>
+                <th>DL Eq.</th>
+                <th>IDL Val</th>
+                <th>IDL FTE</th>
+                <th>Yield Val</th>
+                <th>Yield %</th>
+                <th>Quality Val</th>
+                <th>Quality Cases</th>
               </tr>
             </thead>
             <tbody>
@@ -601,10 +621,17 @@
                     </button>
                   </div>
                 </td>
+                <td>{{ log.comment_text }}</td>
                 <td>{{ formatCurrency(log.capacity_gain_value) }}</td>
-                <td>{{ formatCurrency(log.yield_value) }}</td>
+                <td>{{ formatPercent(log.capacity_gain_pct) }}</td>
                 <td>{{ formatCurrency(log.dl_value) }}</td>
+                <td>{{ log.dl_equivalent }}</td>
+                <td>{{ formatCurrency(log.idl_value) }}</td>
+                <td>{{ log.idl_fte }}</td>
+                <td>{{ formatCurrency(log.yield_value) }}</td>
+                <td>{{ formatPercent(log.yield_gain_pct) }}</td>
                 <td>{{ formatCurrency(log.quality_value) }}</td>
+                <td>{{ log.quality_cases }}</td>
               </tr>
             </tbody>
           </table>
@@ -622,7 +649,7 @@
 
     <!-- GLOBAL AUDIT LOG MODAL -->
     <div v-if="showGlobalHistoryModal" class="modal-overlay">
-      <div class="modal x-large-modal">
+      <div class="modal x-large-modal" style="max-width: 98%;">
         <h3>Global Audit Log: Manager Dashboard</h3>
 
         <div v-if="isFetchingGlobalHistory" style="text-align: center; padding: 20px;">
@@ -827,15 +854,22 @@ export default {
 
     globalHistoryColumns() {
       return [
-        { label: 'Date Changed', field: 'changed_at' },
-        { label: 'Changed By', field: 'changed_by' },
-        { label: 'Action', field: 'action_type' },
-        { label: 'Project ID', field: 'project_id' },
-        { label: 'Project Name', field: 'project_name' },
-        { label: 'Capacity Impr.', field: 'capacity_gain_value', formatFn: this.formatCurrency },
-        { label: 'Yield Savings', field: 'yield_value', formatFn: this.formatCurrency },
-        { label: 'DL Value', field: 'dl_value', formatFn: this.formatCurrency },
-        { label: 'Quality Value', field: 'quality_value', formatFn: this.formatCurrency }
+        { label: 'Date Changed', field: 'changed_at', width: '160px' },
+        { label: 'Changed By', field: 'changed_by', width: '120px' },
+        { label: 'Action', field: 'action_type', width: '120px' },
+        { label: 'Project ID', field: 'project_id', width: '100px' },
+        { label: 'Project Name', field: 'project_name', width: '150px' },
+        { label: 'Comment', field: 'comment_text', width: '200px' },
+        { label: 'Cap. Gain Val', field: 'capacity_gain_value', formatFn: this.formatCurrency, width: '120px' },
+        { label: 'Cap. Gain %', field: 'capacity_gain_pct', formatFn: this.formatPercent, width: '100px' },
+        { label: 'DL Value', field: 'dl_value', formatFn: this.formatCurrency, width: '120px' },
+        { label: 'DL Eq.', field: 'dl_equivalent', width: '90px' },
+        { label: 'IDL Value', field: 'idl_value', formatFn: this.formatCurrency, width: '120px' },
+        { label: 'IDL FTE', field: 'idl_fte', width: '90px' },
+        { label: 'Yield Value', field: 'yield_value', formatFn: this.formatCurrency, width: '120px' },
+        { label: 'Yield %', field: 'yield_gain_pct', formatFn: this.formatPercent, width: '90px' },
+        { label: 'Quality Value', field: 'quality_value', formatFn: this.formatCurrency, width: '120px' },
+        { label: 'Quality Cases', field: 'quality_cases', width: '110px' }
       ];
     },
 
@@ -1116,14 +1150,13 @@ export default {
     },
 
     buildKpiPieData() {
+      // Ensure we ONLY pull financial value metrics so the pie chart proportions make mathematical sense
       const metrics = [
-        { label: 'Capacity Gain Value', field: 'capacityGainValue' },
-        { label: 'DL Value', field: 'dlValue' },
-        { label: 'IDL Value', field: 'idlValue' },
-        { label: 'Yield Value', field: 'yieldValue' },
-        { label: 'Quality Value', field: 'qualityValue' },
-        { label: 'Quality Cases', field: 'qualityCases' },
-        { label: 'IDL FTE', field: 'idlFte' }
+        { label: 'Capacity Gain ($)', field: 'capacityGainValue' },
+        { label: 'DL Value ($)', field: 'dlValue' },
+        { label: 'IDL Value ($)', field: 'idlValue' },
+        { label: 'Yield Value ($)', field: 'yieldValue' },
+        { label: 'Quality Value ($)', field: 'qualityValue' }
       ];
 
       return {
@@ -1135,6 +1168,8 @@ export default {
     },
 
     buildPieOptions(title, labels) {
+      const isFinancial = title === 'KPI Breakdown';
+
       return {
         chart: {
           type: 'pie',
@@ -1155,10 +1190,30 @@ export default {
         },
         dataLabels: {
           enabled: true,
-          formatter: val => `${Number(val).toFixed(1)}%`
+          formatter: (val, opts) => {
+            // By default, 'val' is a percentage.
+            // We use opts.w.config.series to get the absolute number.
+            const absVal = opts.w.config.series[opts.seriesIndex];
+            if (isFinancial) {
+              return '$' + (Number(absVal) / 1000000).toFixed(2) + 'M';
+            }
+            return absVal;
+          },
+          style: {
+            fontSize: '16px',
+            fontWeight: 'bold'
+          }
         },
         tooltip: {
-          enabled: false
+          enabled: true,
+          y: {
+            formatter: (val) => {
+              if (isFinancial) {
+                return '$' + (Number(val) / 1000000).toFixed(2) + 'M';
+              }
+              return val;
+            }
+          }
         },
         stroke: {
           width: 1,
@@ -1421,9 +1476,16 @@ export default {
           action_type: 'CURRENT',
           project_name: this.selectedRow.projectName,
           capacity_gain_value: this.selectedRow.capacityGainValue,
-          yield_value: this.selectedRow.yieldValue,
+          capacity_gain_pct: this.selectedRow.capacityGainPercent,
           dl_value: this.selectedRow.dlValue,
-          quality_value: this.selectedRow.qualityValue
+          dl_equivalent: this.selectedRow.dlEquivalent,
+          idl_value: this.selectedRow.idlValue,
+          idl_fte: this.selectedRow.idlFte,
+          yield_value: this.selectedRow.yieldValue,
+          yield_gain_pct: this.selectedRow.yieldPercentGain,
+          quality_value: this.selectedRow.qualityValue,
+          quality_cases: this.selectedRow.qualityCases,
+          comment_text: this.selectedRow.comment
         };
 
         this.historyData = [currentState, ...historicalRecords];
@@ -1460,9 +1522,16 @@ export default {
             project_id: row.projectId,
             project_name: row.projectName,
             capacity_gain_value: row.capacityGainValue,
-            yield_value: row.yieldValue,
+            capacity_gain_pct: row.capacityGainPercent,
             dl_value: row.dlValue,
-            quality_value: row.qualityValue
+            dl_equivalent: row.dlEquivalent,
+            idl_value: row.idlValue,
+            idl_fte: row.idlFte,
+            yield_value: row.yieldValue,
+            yield_gain_pct: row.yieldPercentGain,
+            quality_value: row.qualityValue,
+            quality_cases: row.qualityCases,
+            comment_text: row.comment
           }));
 
         const combined = [...currentRecords, ...historicalRecords];
@@ -2076,8 +2145,8 @@ export default {
   max-width: 1000px;
 }
 .x-large-modal {
-  width: 95%;
-  max-width: 1400px;
+  width: 98%;
+  max-width: 1600px;
 }
 .modal h3 {
   margin-top: 0;
@@ -2136,6 +2205,7 @@ export default {
 .history-table-container {
   max-height: 400px;
   overflow-y: auto;
+  overflow-x: auto;
   margin-top: 16px;
   border: 1px solid #e0e6ed;
   border-radius: 8px;
@@ -2150,6 +2220,7 @@ export default {
   padding: 10px 14px;
   text-align: left;
   font-size: 0.95rem;
+  white-space: nowrap;
 }
 .history-table th {
   background-color: #f8f9fb;
