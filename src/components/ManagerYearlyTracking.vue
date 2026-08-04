@@ -1077,7 +1077,7 @@ export default {
     // TREND CHARTS LOGIC (Filtered by Site Button)
     // ==========================================
     analyticsSiteOptions() {
-      return [...new Set(this.rows.map(r => r.sites).filter(Boolean))].sort();
+      return [...new Set(this.rows.map(r => r.sites).filter(site => site && site.toUpperCase() !== 'ALL'))].sort();
     },
     filteredSiteTrendRows() {
       if (this.siteTrendConfig.selectedSite === 'ALL') {
