@@ -310,18 +310,18 @@
       <div v-if="rows.length > 0" class="analytics-layout">
         
         <!-- HEADER (UNFILTERED) -->
-        <div style="margin-bottom: 8px;">
+        <div style="margin-bottom: 4px;">
           <h2 class="section-title">Executive Performance Overview</h2>
         </div>
 
-        <!-- NEW: EXECUTIVE CARDS SECTION -->
+        <!-- EXECUTIVE CARDS SECTION -->
         <div class="executive-cards-section">
           <div class="metric-card bg-overall">
             <h4>Overall</h4>
             <div class="metric-content">
               <span class="metric-value">{{ formatMillions(executiveCardsData.Overall.value) }}</span>
               <span class="metric-divider">|</span>
-              <span class="metric-count">{{ executiveCardsData.Overall.count }} Projects</span>
+              <span class="metric-count">{{ executiveCardsData.Overall.count }} Proj</span>
             </div>
           </div>
           <div class="metric-card bg-g1">
@@ -329,7 +329,7 @@
             <div class="metric-content">
               <span class="metric-value">{{ formatMillions(executiveCardsData.G1.value) }}</span>
               <span class="metric-divider">|</span>
-              <span class="metric-count">{{ executiveCardsData.G1.count }} Projects</span>
+              <span class="metric-count">{{ executiveCardsData.G1.count }} Proj</span>
             </div>
           </div>
           <div class="metric-card bg-g2">
@@ -337,7 +337,7 @@
             <div class="metric-content">
               <span class="metric-value">{{ formatMillions(executiveCardsData.G2.value) }}</span>
               <span class="metric-divider">|</span>
-              <span class="metric-count">{{ executiveCardsData.G2.count }} Projects</span>
+              <span class="metric-count">{{ executiveCardsData.G2.count }} Proj</span>
             </div>
           </div>
           <div class="metric-card bg-g3">
@@ -345,7 +345,7 @@
             <div class="metric-content">
               <span class="metric-value">{{ formatMillions(executiveCardsData.G3.value) }}</span>
               <span class="metric-divider">|</span>
-              <span class="metric-count">{{ executiveCardsData.G3.count }} Projects</span>
+              <span class="metric-count">{{ executiveCardsData.G3.count }} Proj</span>
             </div>
           </div>
         </div>
@@ -406,54 +406,64 @@
           </div>
         </div>
 
-        <!-- FILTER BAR FOR LINE CHARTS ONLY -->
-        <div class="analytics-shared-header" style="margin-top: 10px;">
-          <h2 class="section-title" style="font-size: 1.1rem;">Site-Level Variance & Tracking</h2>
-          <div class="chart-controls">
-            <label style="font-weight: bold; color: #07254a;">Filter Site for Trends:</label>
-            <select v-model="siteTrendConfig.selectedSite" class="control-select">
-              <option value="ALL">All Sites (Combined)</option>
-              <option v-for="site in analyticsSiteOptions" :key="site" :value="site">
-                {{ site }}
-              </option>
-            </select>
+        <!-- TREND CHARTS WRAPPER WITH SIDEBAR -->
+        <div class="trends-wrapper">
+          
+          <!-- SITE FILTER BUTTON SIDEBAR -->
+          <div class="site-filter-sidebar">
+            <button
+              class="site-btn"
+              :class="{ active: siteTrendConfig.selectedSite === 'ALL' }"
+              @click="siteTrendConfig.selectedSite = 'ALL'"
+            >
+              All Sites
+            </button>
+            <button
+              v-for="site in analyticsSiteOptions"
+              :key="site"
+              class="site-btn"
+              :class="{ active: siteTrendConfig.selectedSite === site }"
+              @click="siteTrendConfig.selectedSite = site"
+            >
+              {{ site }}
+            </button>
+          </div>
+
+          <!-- TREND CHARTS GRID (Side-by-Side) -->
+          <div class="trend-charts-section">
+            <!-- CHART 1: Cumulative Values -->
+            <div class="chart-card">
+              <div class="chart-header">
+                <h3 class="chart-title">Cumulative AI Values</h3>
+              </div>
+              <div class="chart-body">
+                <apexchart
+                  type="line"
+                  height="260"
+                  :options="cumulativeTrendOptions"
+                  :series="cumulativeTrendSeries"
+                ></apexchart>
+              </div>
+            </div>
+
+            <!-- CHART 2: Annualized Values -->
+            <div class="chart-card">
+              <div class="chart-header">
+                <h3 class="chart-title">Annualized AI Values</h3>
+              </div>
+              <div class="chart-body">
+                <apexchart
+                  type="line"
+                  height="260"
+                  :options="annualizedTrendOptions"
+                  :series="annualizedTrendSeries"
+                ></apexchart>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- TREND CHARTS GRID (Side-by-Side) -->
-        <div class="trend-charts-section">
-          <!-- CHART 1: Actual vs Expected -->
-          <div class="chart-card">
-            <div class="chart-header">
-              <h3 class="chart-title">Actual vs Expected Value</h3>
-            </div>
-            <div class="chart-body">
-              <apexchart
-                type="line"
-                height="360"
-                :options="siteTrendOptions"
-                :series="siteTrendSeries"
-              ></apexchart>
-            </div>
-          </div>
-
-          <!-- CHART 2: Variance vs Expected -->
-          <div class="chart-card">
-            <div class="chart-header">
-              <h3 class="chart-title">Variance vs Expected Value</h3>
-            </div>
-            <div class="chart-body">
-              <apexchart
-                type="line"
-                height="360"
-                :options="varianceTrendOptions"
-                :series="varianceTrendSeries"
-              ></apexchart>
-            </div>
-          </div>
-        </div>
-
-        <!-- 4 PIE CHARTS -->
+        <!-- 4 PIE CHARTS (Now all on 1 Row) -->
         <div class="piecharts-section">
           <div class="chart-card">
             <div class="chart-header">
@@ -462,7 +472,7 @@
             <div class="chart-body">
               <apexchart
                 type="pie"
-                height="350"
+                height="240"
                 :options="dtitPieOptions"
                 :series="dtitPieSeries"
               ></apexchart>
@@ -476,7 +486,7 @@
             <div class="chart-body">
               <apexchart
                 type="pie"
-                height="350"
+                height="240"
                 :options="foakPieOptions"
                 :series="foakPieSeries"
               ></apexchart>
@@ -490,7 +500,7 @@
             <div class="chart-body">
               <apexchart
                 type="pie"
-                height="350"
+                height="240"
                 :options="pillarPieOptions"
                 :series="pillarPieSeries"
               ></apexchart>
@@ -504,7 +514,7 @@
             <div class="chart-body">
               <apexchart
                 type="pie"
-                height="350"
+                height="240"
                 :options="kpiPieOptions"
                 :series="kpiPieSeries"
               ></apexchart>
@@ -1064,7 +1074,7 @@ export default {
     },
 
     // ==========================================
-    // TREND CHARTS LOGIC (Filtered by Site)
+    // TREND CHARTS LOGIC (Filtered by Site Button)
     // ==========================================
     analyticsSiteOptions() {
       return [...new Set(this.rows.map(r => r.sites).filter(Boolean))].sort();
@@ -1076,10 +1086,10 @@ export default {
       return this.rows.filter(r => r.sites === this.siteTrendConfig.selectedSite);
     },
     siteTrendData() {
-      // Standardize x-axis to strings of the Year
       const labels = this.trackingYears.map(String);
       const rows = this.filteredSiteTrendRows;
 
+      // Base Annualized Arrays
       const actual = this.trackingYears.map(year => {
         const total = rows.reduce((sum, row) => sum + (Number(row[`year${year}`]) || 0), 0);
         return Number((total / 1000000).toFixed(3));
@@ -1090,20 +1100,30 @@ export default {
         return Number((value * dummyFactor).toFixed(3));
       });
 
-      const variance = actual.map((val, idx) => {
-        return Number((val - expected[idx]).toFixed(3));
+      // Cumulative Calculations
+      let cumActualSum = 0;
+      const cumulativeActual = actual.map(val => {
+        cumActualSum += val;
+        return Number(cumActualSum.toFixed(3));
+      });
+
+      let cumExpectedSum = 0;
+      const cumulativeExpected = expected.map(val => {
+        cumExpectedSum += val;
+        return Number(cumExpectedSum.toFixed(3));
       });
 
       return {
         labels,
         actual,
         expected,
-        variance
+        cumulativeActual,
+        cumulativeExpected
       };
     },
     
-    // Options and Series for CHART 1: Actual vs Expected
-    siteTrendOptions() {
+    // Options and Series for CHART 1: Cumulative AI Values
+    cumulativeTrendOptions() {
       return {
         chart: {
           fontFamily: 'Arial, sans-serif',
@@ -1114,21 +1134,13 @@ export default {
         xaxis: {
           categories: this.siteTrendData.labels,
           title: { text: 'Year' },
-          labels: {
-            style: {
-              fontSize: '15px', // <--- ADD THIS (Adjust to your liking)
-              fontWeight: 600   // Optional: You can also make it bold
-            }
-          }
+          labels: { style: { fontSize: '15px', fontWeight: 600 } }
         },
         yaxis: {
-          title: { text: 'Value (Millions)' },
+          title: { text: 'Cumulative Value (Millions)' },
           labels: {
             formatter: value => `${Number(value).toFixed(1)}M`,
-            style: {
-              fontSize: '15px', // <--- ADD THIS
-              fontWeight: 600   // Optional
-            }
+            style: { fontSize: '15px', fontWeight: 600 }
           }
         },
         stroke: {
@@ -1151,40 +1163,32 @@ export default {
         noData: { text: 'No site data available' }
       };
     },
-    siteTrendSeries() {
+    cumulativeTrendSeries() {
       return [
-        { name: 'Actual Value', type: 'column', data: this.siteTrendData.actual },
-        { name: 'Expected Value', type: 'line', data: this.siteTrendData.expected }
+        { name: 'Cumulative Actual', type: 'column', data: this.siteTrendData.cumulativeActual },
+        { name: 'Cumulative Expected', type: 'line', data: this.siteTrendData.cumulativeExpected }
       ];
     },
 
-    // Options and Series for CHART 2: Variance vs Expected
-    varianceTrendOptions() {
+    // Options and Series for CHART 2: Annualized AI Values
+    annualizedTrendOptions() {
       return {
         chart: {
           fontFamily: 'Arial, sans-serif',
           toolbar: { show: false },
           animations: { enabled: false }
         },
-        colors: ['#17a2b8', '#d93025'], // Teal for Variance, Red for Expected
+        colors: ['#17a2b8', '#d93025'], // Teal for Actual, Red for Expected
         xaxis: {
           categories: this.siteTrendData.labels,
           title: { text: 'Year' },
-          labels: {
-            style: {
-              fontSize: '15px', // <--- ADD THIS (Adjust to your liking)
-              fontWeight: 600   // Optional: You can also make it bold
-            }
-          }
+          labels: { style: { fontSize: '15px', fontWeight: 600 } }
         },
         yaxis: {
-          title: { text: 'Value (Millions)' },
+          title: { text: 'Annualized Value (Millions)' },
           labels: {
             formatter: value => `${Number(value).toFixed(1)}M`,
-            style: {
-              fontSize: '15px', // <--- ADD THIS
-              fontWeight: 600   // Optional
-            }
+            style: { fontSize: '15px', fontWeight: 600 }
           }
         },
         stroke: {
@@ -1207,10 +1211,10 @@ export default {
         noData: { text: 'No site data available' }
       };
     },
-    varianceTrendSeries() {
+    annualizedTrendSeries() {
       return [
-        { name: 'Variance (Actual - Expected)', type: 'column', data: this.siteTrendData.variance },
-        { name: 'Expected Value', type: 'line', data: this.siteTrendData.expected }
+        { name: 'Annualized Actual', type: 'column', data: this.siteTrendData.actual },
+        { name: 'Annualized Expected', type: 'line', data: this.siteTrendData.expected }
       ];
     },
 
@@ -1453,17 +1457,17 @@ export default {
           show: true,
           position: 'bottom',
           horizontalAlign: 'center',
-          fontSize: '16px',
+          fontSize: '14px',
           fontWeight: 500,
           markers: {
-            width: 12,
-            height: 12,
-            radius: 12,
-            offsetX: -4,
+            width: 10,
+            height: 10,
+            radius: 10,
+            offsetX: -2,
           },
           itemMargin: {
-            horizontal: 10,
-            vertical: 5
+            horizontal: 8,
+            vertical: 2
           },
           formatter: (seriesName, opts) => {
             const val = opts.w.globals.seriesTotals[opts.seriesIndex];
@@ -1471,7 +1475,7 @@ export default {
             const percent = total > 0 ? ((val / total) * 100).toFixed(1) : '0.0';
 
             if (isFinancial) {
-              const millions = '$' + (Number(val) / 1000000).toFixed(2) + 'M';
+              const millions = '$' + (Number(val) / 1000000).toFixed(1) + 'M';
               return `${seriesName}: ${millions} (${percent}%)`;
             }
             return `${seriesName}: ${val} (${percent}%)`;
@@ -1497,7 +1501,7 @@ export default {
               const percent = total > 0 ? ((val / total) * 100).toFixed(1) : '0.0';
               
               if (isFinancial) {
-                const millions = '$' + (Number(val) / 1000000).toFixed(2) + 'M';
+                const millions = '$' + (Number(val) / 1000000).toFixed(1) + 'M';
                 return `${millions} (${percent}%)`;
               }
               return `${val} (${percent}%)`;
@@ -2263,37 +2267,27 @@ export default {
 
 /* Analytics Shared Header & Summary Tables */
 .analytics-section {
-  padding: 20px;
+  padding: 16px 20px;
 }
 .analytics-layout {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-}
-.analytics-shared-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: white;
-  padding: 16px 20px;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-  border: 1px solid #e0e6ed;
+  gap: 12px; /* Compressed layout gap */
 }
 .section-title {
   margin: 0;
   color: #07254a;
-  font-size: 1.2rem;
+  font-size: 1.15rem;
 }
 
 /* Executive Cards CSS */
 .executive-cards-section {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 20px;
+  gap: 16px;
 }
 .metric-card {
-  padding: 20px;
+  padding: 16px;
   border-radius: 8px;
   color: white;
   box-shadow: 0 4px 10px rgba(0,0,0,0.1);
@@ -2306,8 +2300,8 @@ export default {
   transform: translateY(-3px);
 }
 .metric-card h4 {
-  margin: 0 0 12px 0;
-  font-size: 1.1rem;
+  margin: 0 0 8px 0;
+  font-size: 1.05rem;
   text-transform: uppercase;
   letter-spacing: 1px;
   opacity: 0.95;
@@ -2319,15 +2313,15 @@ export default {
   flex-wrap: wrap;
 }
 .metric-value {
-  font-size: 1.8rem;
+  font-size: 1.6rem;
   font-weight: 800;
 }
 .metric-divider {
-  font-size: 1.5rem;
+  font-size: 1.4rem;
   opacity: 0.7;
 }
 .metric-count {
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-weight: 500;
   opacity: 0.95;
 }
@@ -2340,7 +2334,7 @@ export default {
 .summary-tables-section {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 20px;
+  gap: 16px;
 }
 .table-responsive {
   overflow-x: auto;
@@ -2348,12 +2342,12 @@ export default {
 .summary-table {
   width: 100%;
   border-collapse: collapse;
-  margin-top: 8px;
+  margin-top: 4px;
 }
 .summary-table th, .summary-table td {
-  padding: 12px 16px;
+  padding: 10px 14px;
   border-bottom: 1px solid #e0e6ed;
-  font-size: 1rem;
+  font-size: 0.95rem;
 }
 .summary-table th {
   background-color: #f8f9fb;
@@ -2365,28 +2359,67 @@ export default {
   background-color: #f0f4f8;
 }
 
-/* Charts CSS */
+/* Trend Charts Wrapper & Sidebar CSS */
+.trends-wrapper {
+  display: flex;
+  gap: 16px;
+  margin-top: 4px;
+}
+.site-filter-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 120px;
+}
+.site-btn {
+  padding: 12px 16px;
+  background-color: white;
+  border: 1px solid #e0e6ed;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  color: #6c757d;
+  text-align: left;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+}
+.site-btn:hover {
+  border-color: #1f5fa8;
+  color: #1f5fa8;
+  background-color: #f0f4f8;
+}
+.site-btn.active {
+  background-color: #1f5fa8;
+  color: white;
+  border-color: #1f5fa8;
+  box-shadow: 0 4px 8px rgba(31, 95, 168, 0.2);
+}
+
 .trend-charts-section {
+  flex: 1;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 20px;
+  gap: 16px;
 }
+
+/* Pie Charts CSS */
 .piecharts-section {
   display: grid;
-  grid-template-columns: repeat(2, minmax(320px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(4, 1fr); /* 4 Charts in a single row */
+  gap: 16px;
 }
 .chart-card {
   background: white;
   border-radius: 8px;
-  padding: 20px;
+  padding: 12px 16px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   border: 1px solid #e0e6ed;
 }
 .chart-header {
   border-bottom: 2px solid #eee;
-  padding-bottom: 12px;
-  margin-bottom: 16px;
+  padding-bottom: 8px;
+  margin-bottom: 12px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -2394,25 +2427,7 @@ export default {
 .chart-title {
   margin: 0;
   color: #07254a;
-  font-size: 1.1rem;
-}
-.chart-controls {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.control-select {
-  padding: 6px 12px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  font-size: 0.9rem;
-  background-color: #f8f9fb;
-  color: #07254a;
-  font-weight: 600;
-}
-.chart-body {
-  min-height: 350px;
+  font-size: 1rem;
 }
 
 /* Layout Elements */
@@ -2823,17 +2838,31 @@ export default {
 }
 
 /* Responsive Enhancements */
+@media (max-width: 1400px) {
+  .piecharts-section {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 @media (max-width: 1100px) {
   .executive-cards-section {
     grid-template-columns: repeat(2, 1fr);
+  }
+  .trends-wrapper {
+    flex-direction: column;
+  }
+  .site-filter-sidebar {
+    flex-direction: row;
+    overflow-x: auto;
+    padding-bottom: 8px;
+  }
+  .site-btn {
+    white-space: nowrap;
   }
   .trend-charts-section {
     grid-template-columns: 1fr;
   }
   .summary-tables-section {
-    grid-template-columns: 1fr;
-  }
-  .piecharts-section {
     grid-template-columns: 1fr;
   }
   .timeline-window-controls {
@@ -2846,6 +2875,9 @@ export default {
 
 @media (max-width: 700px) {
   .executive-cards-section {
+    grid-template-columns: 1fr;
+  }
+  .piecharts-section {
     grid-template-columns: 1fr;
   }
   .form-grid {
