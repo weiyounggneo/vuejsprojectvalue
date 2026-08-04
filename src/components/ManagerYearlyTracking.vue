@@ -125,14 +125,7 @@
               class="timeline-shortcut-btn"
               @click="applyTimelineWindow(defaultTimelineStart, defaultTimelineEnd)"
             >
-              Default
-            </button>
-            <button
-              type="button"
-              class="timeline-shortcut-btn"
-              @click="applyTimelineWindow(2030, 2035)"
-            >
-              2030 - 2035
+              Default (N-1 to N+3)
             </button>
             <button
               type="button"
@@ -299,6 +292,7 @@
         <div class="audit-grid">
           <div><strong>Project ID:</strong> {{ selectedRow.projectId || '-' }}</div>
           <div><strong>Project Name:</strong> {{ selectedRow.projectName || '-' }}</div>
+          <div><strong>Project Status:</strong> {{ selectedRow.projectStatus || '-' }}</div>
           <div><strong>Pillars:</strong> {{ selectedRow.pillars || '-' }}</div>
           <div><strong>Sites:</strong> {{ selectedRow.sites || '-' }}</div>
           <div><strong>Current PMO Gate:</strong> {{ selectedRow.currentPmoGate || '-' }}</div>
@@ -314,27 +308,148 @@
     <!-- ========================================== -->
     <div v-if="activeTab === 'analytics'" class="analytics-section">
       <div v-if="rows.length > 0" class="analytics-layout">
-        <!-- TOP COMBO GRAPH -->
-        <div class="chart-card wide-chart-card">
-          <div class="chart-header">
-            <h3 class="chart-title">Site Yearly Value vs Expected Value</h3>
-            <div class="chart-controls">
-              <select v-model="siteTrendConfig.selectedSite" class="control-select">
-                <option value="ALL">All Sites (Combined)</option>
-                <option v-for="site in analyticsSiteOptions" :key="site" :value="site">
-                  {{ site }}
-                </option>
-              </select>
+        
+        <!-- HEADER (UNFILTERED) -->
+        <div style="margin-bottom: 8px;">
+          <h2 class="section-title">Executive Performance Overview</h2>
+        </div>
+
+        <!-- NEW: EXECUTIVE CARDS SECTION -->
+        <div class="executive-cards-section">
+          <div class="metric-card bg-overall">
+            <h4>Overall</h4>
+            <div class="metric-content">
+              <span class="metric-value">{{ formatMillions(executiveCardsData.Overall.value) }}</span>
+              <span class="metric-divider">|</span>
+              <span class="metric-count">{{ executiveCardsData.Overall.count }} Projects</span>
+            </div>
+          </div>
+          <div class="metric-card bg-g1">
+            <h4>G1</h4>
+            <div class="metric-content">
+              <span class="metric-value">{{ formatMillions(executiveCardsData.G1.value) }}</span>
+              <span class="metric-divider">|</span>
+              <span class="metric-count">{{ executiveCardsData.G1.count }} Projects</span>
+            </div>
+          </div>
+          <div class="metric-card bg-g2">
+            <h4>G2</h4>
+            <div class="metric-content">
+              <span class="metric-value">{{ formatMillions(executiveCardsData.G2.value) }}</span>
+              <span class="metric-divider">|</span>
+              <span class="metric-count">{{ executiveCardsData.G2.count }} Projects</span>
+            </div>
+          </div>
+          <div class="metric-card bg-g3">
+            <h4>G3</h4>
+            <div class="metric-content">
+              <span class="metric-value">{{ formatMillions(executiveCardsData.G3.value) }}</span>
+              <span class="metric-divider">|</span>
+              <span class="metric-count">{{ executiveCardsData.G3.count }} Projects</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- SUMMARY TABLES SECTION (Side-by-Side) -->
+        <div class="summary-tables-section">
+          <!-- TABLE 1: Pillar Summary -->
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3 class="chart-title">Value by Pillar</h3>
+            </div>
+            <div class="table-responsive">
+              <table class="summary-table">
+                <thead>
+                  <tr>
+                    <th>Pillar</th>
+                    <th style="text-align: center;">Count</th>
+                    <th style="text-align: right;">Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in pillarSummaryData" :key="item.pillar">
+                    <td>{{ item.pillar }}</td>
+                    <td style="text-align: center;">{{ item.count }}</td>
+                    <td style="text-align: right; font-weight: bold;">{{ formatMillions(item.value) }}</td>
+                  </tr>
+                  <tr v-if="pillarSummaryData.length === 0">
+                    <td colspan="3" style="text-align: center; color: #666;">No data available</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
 
-          <div class="chart-body">
-            <apexchart
-              type="line"
-              height="360"
-              :options="siteTrendOptions"
-              :series="siteTrendSeries"
-            ></apexchart>
+          <!-- TABLE 2: Yearly Summary (N to N+2) -->
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3 class="chart-title">Yearly Summary ({{ currentYear }} - {{ currentYear + 2 }})</h3>
+            </div>
+            <div class="table-responsive">
+              <table class="summary-table">
+                <thead>
+                  <tr>
+                    <th>Year</th>
+                    <th style="text-align: right;">Actual</th>
+                    <th style="text-align: right;">Target</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in yearlySummaryData" :key="item.year">
+                    <td><strong>{{ item.year }}</strong></td>
+                    <td style="text-align: right;">{{ formatMillions(item.actual) }}</td>
+                    <td style="text-align: right; color: #d93025;">{{ formatMillions(item.target) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- FILTER BAR FOR LINE CHARTS ONLY -->
+        <div class="analytics-shared-header" style="margin-top: 10px;">
+          <h2 class="section-title" style="font-size: 1.1rem;">Site-Level Variance & Tracking</h2>
+          <div class="chart-controls">
+            <label style="font-weight: bold; color: #07254a;">Filter Site for Trends:</label>
+            <select v-model="siteTrendConfig.selectedSite" class="control-select">
+              <option value="ALL">All Sites (Combined)</option>
+              <option v-for="site in analyticsSiteOptions" :key="site" :value="site">
+                {{ site }}
+              </option>
+            </select>
+          </div>
+        </div>
+
+        <!-- TREND CHARTS GRID (Side-by-Side) -->
+        <div class="trend-charts-section">
+          <!-- CHART 1: Actual vs Expected -->
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3 class="chart-title">Actual vs Expected Value</h3>
+            </div>
+            <div class="chart-body">
+              <apexchart
+                type="line"
+                height="360"
+                :options="siteTrendOptions"
+                :series="siteTrendSeries"
+              ></apexchart>
+            </div>
+          </div>
+
+          <!-- CHART 2: Variance vs Expected -->
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3 class="chart-title">Variance vs Expected Value</h3>
+            </div>
+            <div class="chart-body">
+              <apexchart
+                type="line"
+                height="360"
+                :options="varianceTrendOptions"
+                :series="varianceTrendSeries"
+              ></apexchart>
+            </div>
           </div>
         </div>
 
@@ -347,7 +462,7 @@
             <div class="chart-body">
               <apexchart
                 type="pie"
-                height="320"
+                height="350"
                 :options="dtitPieOptions"
                 :series="dtitPieSeries"
               ></apexchart>
@@ -361,7 +476,7 @@
             <div class="chart-body">
               <apexchart
                 type="pie"
-                height="320"
+                height="350"
                 :options="foakPieOptions"
                 :series="foakPieSeries"
               ></apexchart>
@@ -375,7 +490,7 @@
             <div class="chart-body">
               <apexchart
                 type="pie"
-                height="320"
+                height="350"
                 :options="pillarPieOptions"
                 :series="pillarPieSeries"
               ></apexchart>
@@ -389,7 +504,7 @@
             <div class="chart-body">
               <apexchart
                 type="pie"
-                height="320"
+                height="350"
                 :options="kpiPieOptions"
                 :series="kpiPieSeries"
               ></apexchart>
@@ -424,6 +539,18 @@
             <div class="form-group">
               <label for="projectName">Project Name <span style="color:red">*</span></label>
               <input id="projectName" type="text" v-model="activeForm.projectName" :disabled="isProcessing" required />
+            </div>
+
+            <div class="form-group">
+              <label for="projectStatus">Project Status</label>
+              <select id="projectStatus" v-model="activeForm.projectStatus" :disabled="isProcessing">
+                <option value="">(Blank)</option>
+                <option value="Ongoing">Ongoing</option>
+                <option value="Closed">Closed</option>
+                <option value="G1">G1</option>
+                <option value="G2">G2</option>
+                <option value="G3">G3</option>
+              </select>
             </div>
 
             <div class="form-group">
@@ -584,7 +711,8 @@
               <tr>
                 <th>Date Changed</th>
                 <th>Changed By</th>
-                <th>Status</th>
+                <th>Status (Action)</th>
+                <th>Proj. Status</th>
                 <th>Comment</th>
                 <th>Cap. Gain Val</th>
                 <th>Cap. Gain %</th>
@@ -621,6 +749,7 @@
                     </button>
                   </div>
                 </td>
+                <td>{{ log.project_status || '-' }}</td>
                 <td>{{ log.comment_text }}</td>
                 <td>{{ formatCurrency(log.capacity_gain_value) }}</td>
                 <td>{{ formatPercent(log.capacity_gain_pct) }}</td>
@@ -760,18 +889,18 @@ export default {
     const currentYear = new Date().getFullYear();
 
     return {
-      // Timeline Window
+      // Timeline Window: Default to N-1 to N+3
       currentYear,
       defaultTimelineStart: currentYear - 1,
-      defaultTimelineEnd: currentYear + 4,
+      defaultTimelineEnd: currentYear + 3,
       timelineConfig: {
         minYear: currentYear - 10,
         maxYear: currentYear + 20,
         startYear: currentYear - 1,
-        endYear: currentYear + 4
+        endYear: currentYear + 3
       },
 
-      // Analytics site chart filter
+      // Analytics site chart filter (Applies specifically to Line Charts)
       siteTrendConfig: {
         selectedSite: 'ALL'
       },
@@ -859,6 +988,7 @@ export default {
         { label: 'Action', field: 'action_type', width: '120px' },
         { label: 'Project ID', field: 'project_id', width: '100px' },
         { label: 'Project Name', field: 'project_name', width: '150px' },
+        { label: 'Proj. Status', field: 'project_status', width: '110px' },
         { label: 'Comment', field: 'comment_text', width: '200px' },
         { label: 'Cap. Gain Val', field: 'capacity_gain_value', formatFn: this.formatCurrency, width: '120px' },
         { label: 'Cap. Gain %', field: 'capacity_gain_pct', formatFn: this.formatPercent, width: '100px' },
@@ -895,7 +1025,46 @@ export default {
     },
 
     // ==========================================
-    // TOP SITE CHART
+    // EXECUTIVE CARDS DATA (Unfiltered by Site)
+    // ==========================================
+    executiveCardsData() {
+      const result = {
+        Overall: { count: 0, value: 0 },
+        G1: { count: 0, value: 0 },
+        G2: { count: 0, value: 0 },
+        G3: { count: 0, value: 0 }
+      };
+
+      this.rows.forEach(row => {
+        // Calculate the project's value over the selected tracking timeline
+        let projectValue = 0;
+        this.trackingYears.forEach(year => {
+          projectValue += Number(row[`year${year}`]) || 0;
+        });
+
+        // 1. Add to Overall metrics
+        result.Overall.count += 1;
+        result.Overall.value += projectValue;
+
+        // 2. Add to specific Gates based on project status
+        const status = String(row.projectStatus || '').trim().toUpperCase();
+        if (status === 'G1') {
+          result.G1.count += 1;
+          result.G1.value += projectValue;
+        } else if (status === 'G2') {
+          result.G2.count += 1;
+          result.G2.value += projectValue;
+        } else if (status === 'G3') {
+          result.G3.count += 1;
+          result.G3.value += projectValue;
+        }
+      });
+
+      return result;
+    },
+
+    // ==========================================
+    // TREND CHARTS LOGIC (Filtered by Site)
     // ==========================================
     analyticsSiteOptions() {
       return [...new Set(this.rows.map(r => r.sites).filter(Boolean))].sort();
@@ -907,7 +1076,8 @@ export default {
       return this.rows.filter(r => r.sites === this.siteTrendConfig.selectedSite);
     },
     siteTrendData() {
-      const labels = this.trackingYears.map(year => this.formatFiscalYearLabel(year));
+      // Standardize x-axis to strings of the Year
+      const labels = this.trackingYears.map(String);
       const rows = this.filteredSiteTrendRows;
 
       const actual = this.trackingYears.map(year => {
@@ -920,12 +1090,19 @@ export default {
         return Number((value * dummyFactor).toFixed(3));
       });
 
+      const variance = actual.map((val, idx) => {
+        return Number((val - expected[idx]).toFixed(3));
+      });
+
       return {
         labels,
         actual,
-        expected
+        expected,
+        variance
       };
     },
+    
+    // Options and Series for CHART 1: Actual vs Expected
     siteTrendOptions() {
       return {
         chart: {
@@ -933,10 +1110,10 @@ export default {
           toolbar: { show: false },
           animations: { enabled: false }
         },
-        colors: ['#1f5fa8', '#d93025'],
+        colors: ['#1f5fa8', '#d93025'], // Blue for Actual, Red for Expected
         xaxis: {
           categories: this.siteTrendData.labels,
-          title: { text: 'Fiscal Year' }
+          title: { text: 'Year' }
         },
         yaxis: {
           title: { text: 'Value (Millions)' },
@@ -954,37 +1131,116 @@ export default {
             borderRadius: 4
           }
         },
-        dataLabels: {
-          enabled: false
-        },
-        legend: {
-          position: 'top'
-        },
+        dataLabels: { enabled: false },
+        legend: { position: 'top' },
         tooltip: {
           shared: true,
           intersect: false,
-          y: {
-            formatter: value => `${Number(value).toFixed(1)}M`
-          }
+          y: { formatter: value => `${Number(value).toFixed(1)}M` }
         },
-        noData: {
-          text: 'No site data available'
-        }
+        noData: { text: 'No site data available' }
       };
     },
     siteTrendSeries() {
       return [
-        {
-          name: 'Actual Value',
-          type: 'column',
-          data: this.siteTrendData.actual
-        },
-        {
-          name: 'Expected Value (Dummy)',
-          type: 'line',
-          data: this.siteTrendData.expected
-        }
+        { name: 'Actual Value', type: 'column', data: this.siteTrendData.actual },
+        { name: 'Expected Value', type: 'line', data: this.siteTrendData.expected }
       ];
+    },
+
+    // Options and Series for CHART 2: Variance vs Expected
+    varianceTrendOptions() {
+      return {
+        chart: {
+          fontFamily: 'Arial, sans-serif',
+          toolbar: { show: false },
+          animations: { enabled: false }
+        },
+        colors: ['#17a2b8', '#d93025'], // Teal for Variance, Red for Expected
+        xaxis: {
+          categories: this.siteTrendData.labels,
+          title: { text: 'Year' }
+        },
+        yaxis: {
+          title: { text: 'Value (Millions)' },
+          labels: {
+            formatter: value => `${Number(value).toFixed(1)}M`
+          }
+        },
+        stroke: {
+          width: [0, 4],
+          curve: 'smooth'
+        },
+        plotOptions: {
+          bar: {
+            columnWidth: '45%',
+            borderRadius: 4
+          }
+        },
+        dataLabels: { enabled: false },
+        legend: { position: 'top' },
+        tooltip: {
+          shared: true,
+          intersect: false,
+          y: { formatter: value => `${Number(value).toFixed(1)}M` }
+        },
+        noData: { text: 'No site data available' }
+      };
+    },
+    varianceTrendSeries() {
+      return [
+        { name: 'Variance (Actual - Expected)', type: 'column', data: this.siteTrendData.variance },
+        { name: 'Expected Value', type: 'line', data: this.siteTrendData.expected }
+      ];
+    },
+
+    // ==========================================
+    // SUMMARY TABLES DATA (Unfiltered by Site)
+    // ==========================================
+    pillarSummaryData() {
+      const map = {};
+
+      this.rows.forEach(row => {
+        const pillar = row.pillars || 'Unassigned';
+        if (!map[pillar]) {
+          map[pillar] = { count: 0, value: 0 };
+        }
+        
+        map[pillar].count += 1;
+        
+        // Sum timeline values across the currently visible tracking years
+        let projectValue = 0;
+        this.trackingYears.forEach(year => {
+          projectValue += Number(row[`year${year}`]) || 0;
+        });
+        
+        map[pillar].value += projectValue;
+      });
+
+      return Object.entries(map)
+        .map(([pillar, data]) => ({ pillar, ...data }))
+        .sort((a, b) => b.value - a.value); // Sort highest value first
+    },
+
+    yearlySummaryData() {
+      // Requirement: Years N to N+2
+      const years = [this.currentYear, this.currentYear + 1, this.currentYear + 2];
+      
+      return years.map(year => {
+        // Actual Value for the year
+        const actual = this.rows.reduce((sum, row) => sum + (Number(row[`year${year}`]) || 0), 0);
+        
+        // Expected Value Dummy Logic (matches the chart logic)
+        const timelineIdx = this.trackingYears.indexOf(year);
+        const dummyFactor = timelineIdx >= 0 ? 1.08 + (timelineIdx * 0.02) : 1.10;
+        const target = actual * dummyFactor;
+
+        return {
+          year: year,
+          actual: actual,
+          target: target
+        };
+      });
     },
 
     // ==========================================
@@ -1095,12 +1351,6 @@ export default {
       this.cancelInlineEdit();
     },
 
-    formatFiscalYearLabel(year) {
-      const start = String(year % 100).padStart(2, '0');
-      const end = String((year + 1) % 100).padStart(2, '0');
-      return `FY${start}/${end}`;
-    },
-
     buildTimelineForm(base = {}, pruneOldYears = false) {
       const form = { ...base };
       const selectedYearKeys = new Set(this.trackingYears.map(year => `year${year}`));
@@ -1180,7 +1430,32 @@ export default {
         labels,
         colors: this.pieColors,
         legend: {
+          show: true,
           position: 'bottom',
+          horizontalAlign: 'center',
+          fontSize: '16px',
+          fontWeight: 500,
+          markers: {
+            width: 12,
+            height: 12,
+            radius: 12,
+            offsetX: -4,
+          },
+          itemMargin: {
+            horizontal: 10,
+            vertical: 5
+          },
+          formatter: (seriesName, opts) => {
+            const val = opts.w.globals.seriesTotals[opts.seriesIndex];
+            const total = opts.w.globals.seriesTotals.reduce((a, b) => a + b, 0);
+            const percent = total > 0 ? ((val / total) * 100).toFixed(1) : '0.0';
+
+            if (isFinancial) {
+              const millions = '$' + (Number(val) / 1000000).toFixed(2) + 'M';
+              return `${seriesName}: ${millions} (${percent}%)`;
+            }
+            return `${seriesName}: ${val} (${percent}%)`;
+          },
           onItemClick: {
             toggleDataSeries: false
           },
@@ -1188,30 +1463,24 @@ export default {
             highlightDataSeries: false
           }
         },
+        // Turn off internal slice labels so they are only displayed outside via the Legend
         dataLabels: {
-          enabled: true,
-          formatter: (val, opts) => {
-            // By default, 'val' is a percentage.
-            // We use opts.w.config.series to get the absolute number.
-            const absVal = opts.w.config.series[opts.seriesIndex];
-            if (isFinancial) {
-              return '$' + (Number(absVal) / 1000000).toFixed(2) + 'M';
-            }
-            return absVal;
-          },
-          style: {
-            fontSize: '16px',
-            fontWeight: 'bold'
-          }
+          enabled: false
         },
         tooltip: {
           enabled: true,
           y: {
-            formatter: (val) => {
+            formatter: (val, opts) => {
+              // Safely calculate percentage
+              const seriesArr = opts.series || [];
+              const total = seriesArr.reduce((a, b) => a + b, 0);
+              const percent = total > 0 ? ((val / total) * 100).toFixed(1) : '0.0';
+              
               if (isFinancial) {
-                return '$' + (Number(val) / 1000000).toFixed(2) + 'M';
+                const millions = '$' + (Number(val) / 1000000).toFixed(2) + 'M';
+                return `${millions} (${percent}%)`;
               }
-              return val;
+              return `${val} (${percent}%)`;
             }
           }
         },
@@ -1269,7 +1538,12 @@ export default {
         if (!response.ok) throw new Error('Failed to fetch data');
 
         const data = await response.json();
-        this.rows = data;
+        
+        // Ensure projectStatus maps correctly from backend project_status
+        this.rows = data.map(row => ({
+          ...row,
+          projectStatus: row.projectStatus || row.project_status
+        }));
       } catch (err) {
         console.error(err);
       } finally {
@@ -1305,6 +1579,7 @@ export default {
       return [
         { label: 'Project Name', field: 'projectName', type: 'text', fixed: true, width: '180px', hidden: false },
         { label: 'Project ID', field: 'projectId', type: 'text', width: '120px', hidden: true },
+        { label: 'Project Status', field: 'projectStatus', type: 'text', width: '130px', hidden: true },
         { label: 'Pillars', field: 'pillars', type: 'text', width: '150px', hidden: true },
         { label: 'Sites', field: 'sites', type: 'text', width: '150px', hidden: true },
         { label: 'PMO Gate', field: 'currentPmoGate', type: 'text', width: '120px', hidden: true },
@@ -1434,6 +1709,10 @@ export default {
       if (value === null || value === undefined || value === '') return '';
       return `${value}%`;
     },
+    formatMillions(value) {
+      if (!value) return '$0.00M';
+      return '$' + (Number(value) / 1000000).toFixed(2) + 'M';
+    },
 
     // -------------------------------------------------
     // SEARCH / FILTERS
@@ -1475,6 +1754,7 @@ export default {
           changed_by: 'Active Record',
           action_type: 'CURRENT',
           project_name: this.selectedRow.projectName,
+          project_status: this.selectedRow.projectStatus,
           capacity_gain_value: this.selectedRow.capacityGainValue,
           capacity_gain_pct: this.selectedRow.capacityGainPercent,
           dl_value: this.selectedRow.dlValue,
@@ -1521,6 +1801,7 @@ export default {
             action_type: 'CURRENT',
             project_id: row.projectId,
             project_name: row.projectName,
+            project_status: row.projectStatus,
             capacity_gain_value: row.capacityGainValue,
             capacity_gain_pct: row.capacityGainPercent,
             dl_value: row.dlValue,
@@ -1569,6 +1850,7 @@ export default {
       try {
         const payload = {
           projectName: log.project_name,
+          projectStatus: log.project_status,
           comment: log.comment_text || log.comments,
           capacityGainValue: log.capacity_gain_value,
           capacityGainPercent: log.capacity_gain_pct,
@@ -1632,6 +1914,7 @@ export default {
       const stringFields = [
         'projectName',
         'projectId',
+        'projectStatus',
         'pillars',
         'sites',
         'currentPmoGate',
@@ -1670,6 +1953,7 @@ export default {
       const form = {
         projectId: '',
         projectName: '',
+        projectStatus: '',
         pillars: '',
         sites: '',
         currentPmoGate: '',
@@ -1957,7 +2241,7 @@ export default {
   font-weight: 600;
 }
 
-/* Analytics */
+/* Analytics Shared Header & Summary Tables */
 .analytics-section {
   padding: 20px;
 }
@@ -1966,8 +2250,106 @@ export default {
   flex-direction: column;
   gap: 20px;
 }
-.wide-chart-card {
+.analytics-shared-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: white;
+  padding: 16px 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e0e6ed;
+}
+.section-title {
+  margin: 0;
+  color: #07254a;
+  font-size: 1.2rem;
+}
+
+/* Executive Cards CSS */
+.executive-cards-section {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+}
+.metric-card {
+  padding: 20px;
+  border-radius: 8px;
+  color: white;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  transition: transform 0.2s ease;
+}
+.metric-card:hover {
+  transform: translateY(-3px);
+}
+.metric-card h4 {
+  margin: 0 0 12px 0;
+  font-size: 1.1rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.95;
+}
+.metric-content {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.metric-value {
+  font-size: 1.8rem;
+  font-weight: 800;
+}
+.metric-divider {
+  font-size: 1.5rem;
+  opacity: 0.7;
+}
+.metric-count {
+  font-size: 1.1rem;
+  font-weight: 500;
+  opacity: 0.95;
+}
+.bg-overall { background: linear-gradient(135deg, #1f5fa8, #3b7dc9); }
+.bg-g1 { background: linear-gradient(135deg, #28a745, #4cd16a); }
+.bg-g2 { background: linear-gradient(135deg, #fd7e14, #ff9e43); }
+.bg-g3 { background: linear-gradient(135deg, #902f99, #902f99); }
+
+/* Summary Tables CSS */
+.summary-tables-section {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+.table-responsive {
+  overflow-x: auto;
+}
+.summary-table {
   width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+.summary-table th, .summary-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid #e0e6ed;
+  font-size: 0.95rem;
+}
+.summary-table th {
+  background-color: #f8f9fb;
+  color: #07254a;
+  font-weight: bold;
+  text-align: left;
+}
+.summary-table tr:hover {
+  background-color: #f0f4f8;
+}
+
+/* Charts CSS */
+.trend-charts-section {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
 }
 .piecharts-section {
   display: grid;
@@ -1997,6 +2379,7 @@ export default {
 .chart-controls {
   display: flex;
   gap: 8px;
+  align-items: center;
   flex-wrap: wrap;
 }
 .control-select {
@@ -2009,7 +2392,7 @@ export default {
   font-weight: 600;
 }
 .chart-body {
-  min-height: 320px;
+  min-height: 350px;
 }
 
 /* Layout Elements */
@@ -2421,37 +2804,43 @@ export default {
 
 /* Responsive Enhancements */
 @media (max-width: 1100px) {
+  .executive-cards-section {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .trend-charts-section {
+    grid-template-columns: 1fr;
+  }
+  .summary-tables-section {
+    grid-template-columns: 1fr;
+  }
   .piecharts-section {
     grid-template-columns: 1fr;
   }
-
   .timeline-window-controls {
     grid-template-columns: 1fr;
   }
-
   .audit-grid {
     grid-template-columns: repeat(2, minmax(180px, 1fr));
   }
 }
 
 @media (max-width: 700px) {
+  .executive-cards-section {
+    grid-template-columns: 1fr;
+  }
   .form-grid {
     grid-template-columns: 1fr;
   }
-
   .column-manager-grid {
     grid-template-columns: 1fr;
   }
-
   .audit-grid {
     grid-template-columns: 1fr;
   }
-
   .timeline-control-row {
     flex-direction: column;
     align-items: flex-start;
   }
-
   .timeline-control-row input[type='number'] {
     width: 100%;
   }
