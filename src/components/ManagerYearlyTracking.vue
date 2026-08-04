@@ -354,9 +354,6 @@
         <div class="summary-tables-section">
           <!-- TABLE 1: Pillar Summary -->
           <div class="chart-card">
-            <div class="chart-header">
-              <h3 class="chart-title">Value by Pillar</h3>
-            </div>
             <div class="table-responsive">
               <table class="summary-table">
                 <thead>
@@ -382,9 +379,6 @@
 
           <!-- TABLE 2: Yearly Summary (N to N+2) -->
           <div class="chart-card">
-            <div class="chart-header">
-              <h3 class="chart-title">Yearly Summary ({{ currentYear }} - {{ currentYear + 2 }})</h3>
-            </div>
             <div class="table-responsive">
               <table class="summary-table">
                 <thead>
