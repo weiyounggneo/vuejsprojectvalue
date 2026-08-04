@@ -1113,12 +1113,22 @@ export default {
         colors: ['#1f5fa8', '#d93025'], // Blue for Actual, Red for Expected
         xaxis: {
           categories: this.siteTrendData.labels,
-          title: { text: 'Year' }
+          title: { text: 'Year' },
+          labels: {
+            style: {
+              fontSize: '15px', // <--- ADD THIS (Adjust to your liking)
+              fontWeight: 600   // Optional: You can also make it bold
+            }
+          }
         },
         yaxis: {
           title: { text: 'Value (Millions)' },
           labels: {
-            formatter: value => `${Number(value).toFixed(1)}M`
+            formatter: value => `${Number(value).toFixed(1)}M`,
+            style: {
+              fontSize: '15px', // <--- ADD THIS
+              fontWeight: 600   // Optional
+            }
           }
         },
         stroke: {
@@ -1159,12 +1169,22 @@ export default {
         colors: ['#17a2b8', '#d93025'], // Teal for Variance, Red for Expected
         xaxis: {
           categories: this.siteTrendData.labels,
-          title: { text: 'Year' }
+          title: { text: 'Year' },
+          labels: {
+            style: {
+              fontSize: '15px', // <--- ADD THIS (Adjust to your liking)
+              fontWeight: 600   // Optional: You can also make it bold
+            }
+          }
         },
         yaxis: {
           title: { text: 'Value (Millions)' },
           labels: {
-            formatter: value => `${Number(value).toFixed(1)}M`
+            formatter: value => `${Number(value).toFixed(1)}M`,
+            style: {
+              fontSize: '15px', // <--- ADD THIS
+              fontWeight: 600   // Optional
+            }
           }
         },
         stroke: {
@@ -2333,7 +2353,7 @@ export default {
 .summary-table th, .summary-table td {
   padding: 12px 16px;
   border-bottom: 1px solid #e0e6ed;
-  font-size: 0.95rem;
+  font-size: 1rem;
 }
 .summary-table th {
   background-color: #f8f9fb;
