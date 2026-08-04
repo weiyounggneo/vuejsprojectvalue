@@ -1623,6 +1623,7 @@ app.get('/api/manager-yearly', authenticateToken, async (req, res) => {
       const payload = {
         projectId: proj.project_id,
         projectName: proj.project_name,
+        projectStatus: proj.project_status || null,
         pillars: proj.pillar,
         sites: proj.site,
         currentPmoGate: proj.current_pmo_gate,
@@ -1669,7 +1670,7 @@ app.get('/api/manager-yearly/history/all', authenticateToken, requireAdmin, asyn
   try {
     const rows = await bemQueryPromise(
       `SELECT 
-         history_id, project_id, project_name, 
+         history_id, project_id, project_name, project_status,
          capacity_gain_value, capacity_gain_pct, dl_value, dl_equivalent,
          idl_value, idl_fte, yield_value, yield_gain_pct, quality_value, quality_cases, comment_text,
          changed_by, DATE_FORMAT(changed_at, '%Y-%m-%d %H:%i:%s') AS changed_at, 
@@ -1719,6 +1720,7 @@ app.post('/api/manager-yearly', authenticateToken, requireAdmin, async (req, res
     const payload = {
       project_id: normalizeText(req.body.projectId),
       project_name: normalizeText(req.body.projectName),
+      project_status: normalizeText(req.body.projectStatus), // <--- ADD THIS
       pillars: normalizeText(req.body.pillars),
       sites: normalizeText(req.body.sites),
       current_pmo_gate: normalizeText(req.body.currentPmoGate),
@@ -1737,12 +1739,12 @@ app.post('/api/manager-yearly', authenticateToken, requireAdmin, async (req, res
       `
         INSERT INTO ${MANAGER_PROJECTS_TABLE}
         (
-          project_id, project_name, pillar, site, current_pmo_gate, dtit_involved, ai_type, foak_noak
+          project_id, project_name, project_status, pillar, site, current_pmo_gate, dtit_involved, ai_type, foak_noak
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
-        payload.project_id, payload.project_name, payload.pillars, payload.sites,
+        payload.project_id, payload.project_name, payload.project_status, payload.pillars, payload.sites,
         payload.current_pmo_gate, payload.dtit_involved, payload.ai_aa_a_type, payload.foak_noak
       ],
       req
@@ -1770,7 +1772,7 @@ app.put('/api/manager-yearly/:projectId', authenticateToken, requireAdmin, async
     // --- 0. LOG HISTORY BEFORE UPDATE ---
     const currentState = await bemQueryPromise(`
       SELECT 
-        p.project_name, 
+        p.project_name,p.project_status, 
         m.capacity_gain_value, m.capacity_gain_pct, m.dl_value, m.dl_equivalent, 
         m.idl_value, m.idl_fte, m.yield_value, m.yield_gain_pct, 
         m.quality_value, m.quality_cases, 
@@ -1786,7 +1788,7 @@ app.put('/api/manager-yearly/:projectId', authenticateToken, requireAdmin, async
       const curr = currentState[0];
       await bemQueryPromise(`
         INSERT INTO ${MANAGER_HISTORY_TABLE} (
-          project_id, project_name, capacity_gain_value, capacity_gain_pct, 
+          project_id, project_name, project_status, capacity_gain_value, capacity_gain_pct, 
           dl_value, dl_equivalent, idl_value, idl_fte, yield_value, yield_gain_pct, 
           quality_value, quality_cases, comment_text, changed_by, action_type
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'UPDATE')
@@ -1798,15 +1800,22 @@ app.put('/api/manager-yearly/:projectId', authenticateToken, requireAdmin, async
     }
 
     // --- 1. Update Project Master (Metadata) ---
+    // --- 1. Update Project Master (Metadata) ---
     if (req.body.projectName) {
       await bemQueryPromise(
         `UPDATE ${MANAGER_PROJECTS_TABLE} 
-         SET project_name = ?, pillar = ?, site = ?, current_pmo_gate = ?, dtit_involved = ?, ai_type = ?, foak_noak = ? 
+         SET project_name = ?, project_status = ?, pillar = ?, site = ?, current_pmo_gate = ?, dtit_involved = ?, ai_type = ?, foak_noak = ? 
          WHERE project_id = ?`,
         [
-          normalizeText(req.body.projectName), normalizeText(req.body.pillars), normalizeText(req.body.sites),
-          normalizeText(req.body.currentPmoGate), normalizeText(req.body.dtitInvolved), normalizeText(req.body.aiAaAType),
-          normalizeText(req.body.foakNoak), projectId
+          normalizeText(req.body.projectName), 
+          normalizeText(req.body.projectStatus), // <--- ADD THIS
+          normalizeText(req.body.pillars), 
+          normalizeText(req.body.sites),
+          normalizeText(req.body.currentPmoGate), 
+          normalizeText(req.body.dtitInvolved), 
+          normalizeText(req.body.aiAaAType),
+          normalizeText(req.body.foakNoak), 
+          projectId
         ], req
       );
     }
