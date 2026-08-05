@@ -1,0 +1,1205 @@
+"""
+Disk Space Monitoring DAG 
+Monitors disk usage across all servers and mount points
+Creates alerts when disk usage exceeds threshold
+Auto-fixes alerts when disk usage returns to normal (Awaiting Human Closure)
+Complete audit trail with threshold tracking
+Acknowledgement support with escalation on metric increase
+Message format: New alerts: X, Resent: X, Fixed: X
+"""
+
+from airflow.models import DAG, Variable
+from airflow.decorators import task
+from datetime import datetime, timedelta
+from airflow.hooks.base_hook import BaseHook
+import mysql.connector
+from airflow.utils.email import send_email
+from tabulate import tabulate
+import traceback
+import requests  # <--- NEW: Required for Airflow to poll the Codex API!
+
+# ============== AIRFLOW MAINTAINED VARIABLES ==============
+#email_list = "laykoon.png-ext@st.com"
+email_list = "TMQ_MDS_Backend_Maintenance_Team@list.st.com, neo.young@st.com"
+
+# ============== DAG SPECIFIC VARIABLES ==============
+disk_table = 't_monitor_server_disk'
+failures_table = 't_store_run_failures'
+alert_status_table = 't_monitor_server_alert_status'
+alert_infra_table = 't_monitor_server_infra'
+
+# ============== DAG LOGGING VARIABLES ==============
+dag_start_date = datetime.now()
+vdag_id = "monitor_disks_ansible"
+vprojname = "Monitor Disks Ansible"
+THRESHOLD_WARNING = int(Variable.get("disk_warning_threshold", default_var=85))
+THRESHOLD_CRITICAL = int(Variable.get("disk_critical_threshold", default_var=95))
+
+# ============== SHARED FUNCTIONS ==============
+from shared_funcs import manage_success, init_db_proj, insert_job_log_alert
+from shared_funcs.new_exception_handlers_automated import manage_exception_automated, create_codex_incident, close_codex_incident, check_existing_open_incident, resolve_codex_incident
+
+# ============== DATABASE FUNCTIONS ==============
+def init_db_airflow():
+    """Connect to Airflow monitoring database"""
+    try:
+        conn_details = BaseHook.get_connection('airflow_monitoring_db')
+        conn = mysql.connector.connect(
+            host=conn_details.host,
+            port=conn_details.port,
+            user=conn_details.login,
+            password=conn_details.password,
+            database=conn_details.schema
+        )
+        return conn if conn.is_connected() else None
+    except Exception as err:
+        print(f"❌ Database connection error: {err}")
+        raise
+
+
+def get_site_from_server_name(server_name):
+    """Extract site name from server name prefix (first 3 characters)"""
+    site_mapping = {
+        'mua': 'MUAR',
+        'kir': 'MALTA',
+        'b2k': 'BOUSKOURA',
+        'szs': 'SHENZHEN',
+        'tpy': 'TOA PAYOH',
+        'cal': 'CALAMBA',
+    }
+    prefix = server_name[:3].lower()
+    return site_mapping.get(prefix, "UNKNOWN")
+
+
+# ============== EMAIL FUNCTIONS ==============
+def send_alert_email_per_site(site, servers_data_by_site, dag_start_date, email_type='RESEND'):
+    """Send alert email for a site with all affected servers aggregated"""
+    try:
+        summary_data = [['Server Name', 'Mount Point', 'Size (GB)', 'Used (GB)', 'Used (%)', 'Alert Level']]
+
+        for server_name, server_info in servers_data_by_site.items():
+            for metric in server_info['metrics']:
+                if metric['use_percent'] >= THRESHOLD_CRITICAL:
+                    alert_level = '🔴 CRITICAL'
+                else:
+                    alert_level = '🟡 WARNING'
+                
+                summary_data.append([
+                    server_name,
+                    metric['mounted_on'],
+                    str(metric['size']),
+                    str(metric['used']),
+                    str(metric['use_percent']) + '%',
+                    alert_level
+                ])
+
+        html_table = tabulate(summary_data, headers="firstrow", tablefmt='html')
+        html_table = """
+        <style>
+            table { border-collapse: collapse; font-family: Arial, sans-serif; width: 100%; }
+            th, td { border: 1px solid black; padding: 8px; text-align: left; }
+            th { background-color: #f2f2f2; font-weight: bold; }
+            tr:nth-child(even) { background-color: #f9f9f9; }
+        </style>
+        """ + html_table
+
+        email_type_display = {
+            'NEW': '[ALERT]',
+            'RESEND': '[ALERT - RESEND]',
+            'ESCALATION': '[ALERT - ESCALATION]'
+        }.get(email_type, '[ALERT]')
+
+        email_title = f"{email_type_display} Site {site} - Disk Space Alert - {dag_start_date.strftime('%Y-%m-%d %H:%M:%S')}"
+        email_body = f"""
+        <html>
+            <body>
+                <h2>Disk Space Alert - Site {site}</h2>
+                <p><strong>Alert Type:</strong> {email_type}</p>
+                <p><strong>Alert Date:</strong> {dag_start_date.strftime('%Y-%m-%d %H:%M:%S')}</p>
+                <p><strong>Thresholds:</strong> Warning: {THRESHOLD_WARNING}% | Critical: {THRESHOLD_CRITICAL}%</p>
+                <p><strong>Affected Servers:</strong> {len(servers_data_by_site)}</p>
+                <hr>
+                <h3>Details:</h3>
+                {html_table}
+                <hr>
+                <p><strong>Action Required:</strong> Please review the affected filesystems and free up disk space.</p>
+                <p><em>Alert will be resent on next monitoring cycle if not acknowledged or resolved.</em></p>
+                <p>DAG: <strong>{vdag_id}</strong></p>
+            </body>
+        </html>
+        """
+        print(f"📧 Sending {email_type} alert email for site {site} ({len(servers_data_by_site)} servers)")
+        send_email(email_list, email_title, email_body)
+    except Exception as err:
+        print(f"❌ Error sending alert email: {err}")
+        raise
+
+
+def send_fixed_email_per_site(site, servers_fixed, dag_start_date):
+    """Send fixed email when metrics return to normal (awaiting manual closure)"""
+    try:
+        summary_data = [['Server Name', 'Mount Point', 'Current Used (%)']]
+
+        for server_name, filesystems_info in servers_fixed.items():
+            for mounted_on, use_percent in filesystems_info.items():
+                summary_data.append([
+                    server_name,
+                    mounted_on,
+                    str(use_percent) + '%'
+                ])
+
+        html_table = tabulate(summary_data, headers="firstrow", tablefmt='html')
+        html_table = """
+        <style>
+            table { border-collapse: collapse; font-family: Arial, sans-serif; width: 100%; }
+            th, td { border: 1px solid black; padding: 8px; text-align: left; }
+            th { background-color: #90EE90; font-weight: bold; }
+            tr:nth-child(even) { background-color: #f9f9f9; }
+        </style>
+        """ + html_table
+
+        email_title = f"[FIXED] Site {site} - Disk Space Back to Normal - {dag_start_date.strftime('%Y-%m-%d %H:%M:%S')}"
+        email_body = f"""
+        <html>
+            <body>
+                <h2>Disk Space Alert - FIXED - Site {site}</h2>
+                <p><strong>Fix Date:</strong> {dag_start_date.strftime('%Y-%m-%d %H:%M:%S')}</p>
+                <p><strong>Thresholds:</strong> Warning: {THRESHOLD_WARNING}% | Critical: {THRESHOLD_CRITICAL}%</p>
+                <p><strong>Filesystems Fixed:</strong> {sum(len(fs) for fs in servers_fixed.values())}</p>
+                <hr>
+                <h3>Details:</h3>
+                {html_table}
+                <hr>
+                <p><strong>Status:</strong> Disk usage has returned to normal levels. <strong>The ticket is awaiting manual closure.</strong></p>
+                <p>DAG: <strong>{vdag_id}</strong></p>
+            </body>
+        </html>
+        """
+        print(f"📧 Sending FIXED email for site {site} ({sum(len(fs) for fs in servers_fixed.values())} filesystems)")
+        send_email(email_list, email_title, email_body)
+    except Exception as err:
+        print(f"❌ Error sending fixed email: {err}")
+        raise
+
+
+# ============== ALERT STATUS MANAGEMENT ==============
+def insert_alert_status(server_name, site_name, mounted_on, use_percent, threshold_warning, threshold_critical):
+    """
+    Manage alert status with refined logic
+    Uses buffered=True cursor to avoid MySQL connector issues
+    
+    Returns:
+        ('NEW', dict) - New alert created
+        ('UPDATED', None) - OPEN alert, still high, resend email
+        ('ACKNOWLEDGED_STILL_HIGH', None) - ACK alert, metric didn't increase, no email
+        ('ACKNOWLEDGED_ESCALATED', None) - ACK alert, metric increased, reopen and send escalation
+        ('FIXED', dict) - Alert metrics normal, awaiting manual closure
+        ('REOPENED', None) - FIXED/CLOSED alert re-triggered
+        ('NORMAL', None) - Below threshold, no action
+    """
+    db_conn = None
+    db_cursor = None
+
+    try:
+        db_conn = init_db_airflow()
+        db_cursor = db_conn.cursor(buffered=True)
+
+        # Check for EXISTING alert (OPEN, ACKNOWLEDGED, or FIXED)
+        check_qry = f"""
+            SELECT alert_id, status, metric_value 
+            FROM {alert_status_table}
+            WHERE server_name = %s 
+              AND metric_name = %s 
+              AND status IN ('OPEN', 'ACKNOWLEDGED', 'FIXED')
+        """
+        db_cursor.execute(check_qry, (server_name, mounted_on))
+        existing_alert = db_cursor.fetchone()
+
+        # ========== USAGE IS HIGH (> 85%) ==========
+        if use_percent > threshold_warning:
+            
+            if existing_alert:
+                alert_id, status, prev_metric_value = existing_alert
+                
+                # ===== OPEN STATE =====
+                if status == 'OPEN':
+                    update_qry = f"""
+                        UPDATE {alert_status_table}
+                        SET metric_value = %s, 
+                            threshold = %s,
+                            last_alert_time = %s
+                        WHERE alert_id = %s
+                    """
+                    db_cursor.execute(update_qry, (use_percent, threshold_warning, datetime.now(), alert_id))
+                    db_conn.commit()
+                    print(f"🔄 UPDATED (OPEN): {server_name} - {mounted_on} = {use_percent}% - RESEND EMAIL")
+                    return ('UPDATED', None)
+                
+                # ===== ACKNOWLEDGED STATE =====
+                elif status == 'ACKNOWLEDGED':
+                    metric_increased = prev_metric_value and use_percent > prev_metric_value
+                    
+                    if metric_increased:
+                        update_qry = f"""
+                            UPDATE {alert_status_table}
+                            SET metric_value = %s, 
+                                threshold = %s,
+                                status = 'OPEN',
+                                acknowledged_by = NULL,
+                                acknowledged_at = NULL,
+                                last_alert_time = %s
+                            WHERE alert_id = %s
+                        """
+                        db_cursor.execute(update_qry, (use_percent, threshold_warning, datetime.now(), alert_id))
+                        db_conn.commit()
+                        print(f"🔴 ESCALATED (from ACK): {server_name} - {mounted_on} = {use_percent}% - SEND ESCALATION EMAIL")
+                        return ('ACKNOWLEDGED_ESCALATED', None)
+                    else:
+                        update_qry = f"""
+                            UPDATE {alert_status_table}
+                            SET metric_value = %s, 
+                                threshold = %s
+                            WHERE alert_id = %s
+                        """
+                        db_cursor.execute(update_qry, (use_percent, threshold_warning, alert_id))
+                        db_conn.commit()
+                        print(f"⏸️  ACKNOWLEDGED_STILL_HIGH: {server_name} - {mounted_on} = {use_percent}% - NO EMAIL")
+                        return ('ACKNOWLEDGED_STILL_HIGH', None)
+
+                # ===== FIXED STATE (Re-spike) =====
+                elif status == 'FIXED':
+                    update_qry = f"""
+                        UPDATE {alert_status_table}
+                        SET metric_value = %s, 
+                            threshold = %s,
+                            status = 'OPEN',
+                            last_alert_time = %s
+                        WHERE alert_id = %s
+                    """
+                    db_cursor.execute(update_qry, (use_percent, threshold_warning, datetime.now(), alert_id))
+                    db_conn.commit()
+                    print(f"🔴 RE-ESCALATED (from FIXED): {server_name} - {mounted_on} = {use_percent}%")
+                    return ('REOPENED', {
+                        'server_name': server_name,
+                        'mounted_on': mounted_on,
+                        'use_percent': use_percent
+                    })
+            
+            else:
+                # Check if CLOSED alert exists
+                check_closed = f"""
+                    SELECT alert_id FROM {alert_status_table}
+                    WHERE server_name = %s 
+                      AND metric_name = %s 
+                      AND status = 'CLOSED'
+                """
+                db_cursor.execute(check_closed, (server_name, mounted_on))
+                closed_alert = db_cursor.fetchone()
+                
+                if closed_alert:
+                    insert_qry = f"""
+                        INSERT INTO {alert_status_table}
+                        (server_name, site_name, dag_id, alert_type, metric_name, metric_value, threshold, status, first_alert_time, last_alert_time)
+                        VALUES (%s, %s, %s, 'DISK', %s, %s, %s, 'OPEN', %s, %s)
+                    """
+                    db_cursor.execute(insert_qry, (
+                        server_name, site_name, vdag_id, mounted_on, use_percent, threshold_warning,
+                        datetime.now(), datetime.now()
+                    ))
+                    db_conn.commit()
+                    print(f"🔴 REOPENED (from CLOSED): {server_name} - {mounted_on} = {use_percent}%")
+                    return ('REOPENED', {
+                        'server_name': server_name,
+                        'mounted_on': mounted_on,
+                        'use_percent': use_percent
+                    })
+                else:
+                    insert_qry = f"""
+                        INSERT INTO {alert_status_table}
+                        (server_name, site_name, dag_id, alert_type, metric_name, metric_value, threshold, status, first_alert_time, last_alert_time)
+                        VALUES (%s, %s, %s, 'DISK', %s, %s, %s, 'OPEN', %s, %s)
+                    """
+                    db_cursor.execute(insert_qry, (
+                        server_name, site_name, vdag_id, mounted_on, use_percent, threshold_warning,
+                        datetime.now(), datetime.now()
+                    ))
+                    db_conn.commit()
+                    print(f"🆕 NEW ALERT: {server_name} - {mounted_on} = {use_percent}%")
+                    return ('NEW', {
+                        'server_name': server_name,
+                        'mounted_on': mounted_on,
+                        'use_percent': use_percent
+                    })
+        
+        # ========== USAGE IS NORMAL (<= 85%) ==========
+        else:
+            if existing_alert:
+                alert_id, status, _ = existing_alert
+                
+                # ONLY auto-fix if it's currently OPEN or ACKNOWLEDGED
+                if status in ['OPEN', 'ACKNOWLEDGED']:
+                    fix_qry = f"""
+                        UPDATE {alert_status_table}
+                        SET metric_value = %s, 
+                            threshold = %s,
+                            status = 'FIXED', 
+                            last_alert_time = %s
+                        WHERE alert_id = %s
+                    """
+                    db_cursor.execute(fix_qry, (use_percent, threshold_warning, datetime.now(), alert_id))
+                    db_conn.commit()
+                    print(f"✅ FIXED: {server_name} - {mounted_on} = {use_percent}%")
+                    
+                    return ('FIXED', { 
+                        'server_name': server_name,
+                        'mounted_on': mounted_on,
+                        'use_percent': use_percent
+                    })
+                elif status == 'FIXED':
+                    return ('NORMAL', None)
+            else:
+                print(f"✔️  NORMAL: {server_name} - {mounted_on} = {use_percent}%")
+                return ('NORMAL', None)
+
+    except Exception as err:
+        print(f"❌ Error in insert_alert_status: {err}")
+        traceback.print_exc()
+        raise
+    finally:
+        try:
+            if db_cursor:
+                db_cursor.close()
+        except Exception:
+            pass
+        try:
+            if db_conn:
+                db_conn.close()
+        except Exception:
+            pass
+
+
+def poll_codex_for_closures():
+    """
+    Two-Way Sync: Queries DB for 'FIXED' alerts waiting on a human. 
+    Polls the Codex API to see if a human changed it to 'Closed'.
+    If yes, updates the Airflow DB to 'CLOSED' and unlinks the ticket.
+    """
+    try:
+        conn = init_db_airflow()
+        cursor = conn.cursor(buffered=True)
+        
+        # Find all FIXED alerts that are still waiting for a human
+        cursor.execute(f"""
+            SELECT server_name, metric_name, ticket_artifact_id 
+            FROM {alert_status_table} 
+            WHERE status = 'FIXED' AND ticket_artifact_id IS NOT NULL
+        """)
+        rows = cursor.fetchall()
+        
+        if not rows:
+            print("✔️ No FIXED tickets awaiting human closure check.")
+            return
+            
+        headers = {
+            'Content-type': 'application/json',
+            'X-Auth-AccessKey': Variable.get("codex_api_key") 
+        }
+        
+        for row in rows:
+            server_name, mounted_on, ticket_id = row
+            
+            # Fetch ticket details directly from Codex
+            url = f'https://codex.cro.st.com/api/artifacts/{ticket_id}'
+            response = requests.get(url, headers=headers, verify=False)
+            
+            if response.status_code == 200:
+                artifact = response.json()
+                # Safely extract the status field (usually a string like 'Closed')
+                status = artifact.get('status', '').lower()
+                
+                # If the human closed it in Codex!
+                if status == 'closed':
+                    print(f"📉 TICKETING: Human closure detected in Codex for artifact #{ticket_id} ({server_name} - {mounted_on}). Updating DB to CLOSED.")
+                    
+                    # 1. Update the Active Status table (Surgical update using the exact ticket_id)
+                    cursor.execute(f"""
+                        UPDATE {alert_status_table} 
+                        SET status = 'CLOSED', ticket_artifact_id = NULL, closed_at = %s 
+                        WHERE server_name = %s 
+                          AND metric_name = %s 
+                          AND ticket_artifact_id = %s 
+                          AND status = 'FIXED'
+                    """, (datetime.now(), server_name, mounted_on, ticket_id))
+                    
+                    # 2. Update the Historical Infra table (Surgical update using the exact DAG_id)
+                    cursor.execute(f"""
+                        UPDATE {alert_infra_table}
+                        SET Alert_Status = 'CLOSED'
+                        WHERE ServerName = %s 
+                          AND Metric_Name = %s 
+                          AND DAG_id = %s 
+                          AND Alert_Status = 'FIXED'
+                    """, (server_name, mounted_on, vdag_id))
+                    
+                    conn.commit()
+                else:
+                    print(f"⏳ TICKETING: Artifact #{ticket_id} is still '{status}' in Codex. Waiting for human to close.")
+            else:
+                print(f"⚠️ Failed to fetch status for artifact #{ticket_id}. Status Code: {response.status_code}")
+                
+    except Exception as e:
+        print(f"❌ Failed to poll Codex for closures: {e}")
+    finally:
+        if 'cursor' in locals(): cursor.close()
+        if 'conn' in locals(): conn.close()
+
+
+def link_ticket_to_db(server_name, mounted_on, artifact_id):
+    """Saves the newly created Artifact ID to the database."""
+    try:
+        conn = init_db_airflow()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE t_monitor_server_alert_status 
+            SET ticket_artifact_id = %s 
+            WHERE server_name = %s AND metric_name = %s AND status IN ('OPEN', 'ACKNOWLEDGED')
+        """, (artifact_id, server_name, mounted_on))
+        conn.commit()
+    except Exception as e:
+        print(f"❌ Failed to link DB ticket: {e}")
+    finally:
+        if 'cursor' in locals(): cursor.close()
+        if 'conn' in locals(): conn.close()
+
+def resolve_and_keep_ticket(server_name, mounted_on, current_status):
+    """Finds the saved Artifact ID, resolves it in Codex, and keeps it linked in DB."""
+    try:
+        conn = init_db_airflow()
+        cursor = conn.cursor()
+        
+        # Look up the saved Artifact ID
+        if current_status == 'FIXED':
+            cursor.execute("""
+                SELECT ticket_artifact_id FROM t_monitor_server_alert_status 
+                WHERE server_name = %s AND metric_name = %s AND status = 'FIXED'
+            """, (server_name, mounted_on))
+        else:
+            cursor.execute("""
+                SELECT ticket_artifact_id FROM t_monitor_server_alert_status 
+                WHERE server_name = %s AND metric_name = %s AND status IN ('OPEN', 'ACKNOWLEDGED', 'FIXED')
+            """, (server_name, mounted_on))
+            
+        row = cursor.fetchone()
+        existing_ticket_id = row[0] if row else None
+        
+        # If an ID exists, resolve it
+        if existing_ticket_id:
+            print(f"📉 TICKETING: Resolving artifact #{existing_ticket_id} for {server_name} ({mounted_on})")
+            resolve_codex_incident(existing_ticket_id)
+            # NO UNLINKING: We leave ticket_artifact_id intact for human review
+            
+    except Exception as e:
+        print(f"❌ Failed to resolve DB ticket: {e}")
+    finally:
+        if 'cursor' in locals(): cursor.close()
+        if 'conn' in locals(): conn.close()
+
+# ============== HISTORICAL LOGGING FUNCTION ==============
+def insert_or_update_alert_data(server_name, dag_start_date, dag_end_date, dag_id, 
+                                 metric_name, metric_value, threshold, alert_status,
+                                 is_fixed=False, is_acknowledged=False):
+    """
+    Insert or update alert data in t_monitor_server_infra
+
+    NEVER create new entries. Only:
+    1. INSERT first entry when alert is triggered
+    2. UPDATE Email_Sent and Email_Sent_Timestamp when alert continues
+    3. UPDATE Alert_Status when fixing/acknowledging
+    """
+    db_conn = None
+    db_cursor = None
+
+    try:
+        db_conn = init_db_airflow()
+        db_cursor = db_conn.cursor(buffered=True)
+
+        # Check if ANY entry exists for this server/metric (regardless of date)
+        check_qry = f"""
+            SELECT id, Email_Sent, Alert_Status 
+            FROM {alert_infra_table}
+            WHERE ServerName = %s 
+              AND Metric_Name = %s 
+              AND DAG_id = %s
+              AND Alert_Status NOT IN ('CLOSED', 'FIXED')
+            ORDER BY id DESC
+            LIMIT 1
+        """
+        db_cursor.execute(check_qry, (server_name, metric_name, dag_id))
+        existing_log = db_cursor.fetchone()
+
+        if existing_log:
+            # Entry already exists - UPDATE it
+            record_id = existing_log[0]
+            current_email_count = existing_log[1] if existing_log[1] else 1
+            current_alert_status = existing_log[2]
+            
+            # Check alert status in t_monitor_server_alert_status
+            check_alert_status_qry = f"""
+                SELECT status FROM {alert_status_table}
+                WHERE server_name = %s 
+                  AND metric_name = %s 
+                  AND status IN ('OPEN', 'ACKNOWLEDGED', 'FIXED')
+                LIMIT 1
+            """
+            db_cursor.execute(check_alert_status_qry, (server_name, metric_name))
+            alert_status_result = db_cursor.fetchone()
+            
+            # Determine if we should increment Email_Sent
+            should_increment = not is_acknowledged and (not alert_status_result or alert_status_result[0] != 'ACKNOWLEDGED')
+            new_email_count = current_email_count if not should_increment else current_email_count + 1
+
+            if is_fixed:
+                # ✅ When fixing, set Alert_Status = 'FIXED'
+                update_qry = f"""
+                    UPDATE {alert_infra_table}
+                    SET Email_Sent = %s, 
+                        Email_Sent_Timestamp = %s, 
+                        Metric_Value = %s,
+                        Alert_Threshold = %s,
+                        Alert_Status = 'FIXED'
+                    WHERE id = %s
+                """
+                db_cursor.execute(update_qry, (new_email_count, datetime.now(), metric_value, threshold, record_id))
+                print(f"📊 FIXED alert: {server_name} - {metric_name} (Email_Sent: {new_email_count}, Timestamp: {datetime.now()})")
+            elif should_increment:
+                # ✅ Email sent (NEW or RESEND or ESCALATION), increment Email_Sent and update timestamp
+                update_qry = f"""
+                    UPDATE {alert_infra_table}
+                    SET Email_Sent = %s, 
+                        Email_Sent_Timestamp = %s, 
+                        Metric_Value = %s,
+                        Alert_Threshold = %s,
+                        Alert_Status = %s
+                    WHERE id = %s
+                """
+                db_cursor.execute(update_qry, (new_email_count, datetime.now(), metric_value, threshold, alert_status, record_id))
+                print(f"📊 Updated alert: {server_name} - {metric_name} (Email_Sent: {current_email_count} → {new_email_count}, Timestamp: {datetime.now()})")
+            else:
+                # ✅ ACKNOWLEDGED - Update metric/threshold and status, but DON'T update Email_Sent or Email_Sent_Timestamp
+                update_qry = f"""
+                    UPDATE {alert_infra_table}
+                    SET Metric_Value = %s,
+                        Alert_Threshold = %s,
+                        Alert_Status = %s
+                    WHERE id = %s
+                """
+                db_cursor.execute(update_qry, (metric_value, threshold, alert_status, record_id))
+                print(f"⏸️  ACKNOWLEDGED alert: {server_name} - {metric_name} (NO Email_Sent increment, NO timestamp update)")
+            
+            db_conn.commit()
+            return 'UPDATED'
+        else:
+            # NO entry exists - INSERT first entry ONLY
+            insert_qry = f"""
+                INSERT INTO {alert_infra_table}
+                (ServerName, DAG_StartDate, DAG_EndDate, DAG_id, Metric_Name, Metric_Value, 
+                 Alert_Threshold, Alert_Status, Email_Sent, Email_Sent_Timestamp)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+
+            db_cursor.execute(insert_qry, (
+                server_name,
+                dag_start_date,
+                dag_end_date,
+                dag_id,
+                metric_name,
+                metric_value,
+                threshold,
+                alert_status,
+                1,
+                datetime.now()
+            ))
+            db_conn.commit()
+            print(f"📊 Inserted FIRST entry for alert: {server_name} - {metric_name} (Email_Sent: 1, Timestamp: {datetime.now()})")
+            return 'INSERTED'
+
+    except Exception as err:
+        print(f"❌ Error in insert_or_update_alert_data: {err}")
+        traceback.print_exc()
+        raise
+    finally:
+        try:
+            if db_cursor:
+                db_cursor.close()
+        except Exception:
+            pass
+        try:
+            if db_conn:
+                db_conn.close()
+        except Exception:
+            pass
+
+# ============== LOGGING FUNCTIONS ==============
+def insert_run_failures(dag_id, dag_startdate, event_type, server_name, 
+                       metric_name, metric_value, alert_type, details):       
+    """Log complete event details to audit trail"""
+    db_conn = None
+    db_cursor = None
+
+    try:
+        db_conn = init_db_airflow()
+        db_cursor = db_conn.cursor(buffered=True)
+        
+        error_msg = (f"{event_type}: {server_name} - {metric_name} = {metric_value}% "
+                    f"({alert_type}) - {details}")
+        
+        insert_qry = f"""
+            INSERT INTO {failures_table} 
+            (DAG_id, DAG_StartDate, ErrorMsg) 
+            VALUES (%s, %s, %s)
+        """
+        db_cursor.execute(insert_qry, (dag_id, dag_startdate, error_msg))
+        db_conn.commit()
+        print(f"📋 {error_msg}")
+    except Exception as err:
+        print(f"❌ Error in insert_run_failures: {err}")
+        traceback.print_exc()
+        raise
+    finally:
+        try:
+            if db_cursor:
+                db_cursor.close()
+        except Exception:
+            pass
+        try:
+            if db_conn:
+                db_conn.close()
+        except Exception:
+            pass
+
+
+# ============== MAIN MONITORING TASK ==============
+@task
+def monitor_servers_disks(**kwargs):
+    """Main monitoring task"""
+    db_conn_proj = None
+    db_cursor_proj = None
+
+    try:
+        print("=" * 60)
+        print("🚀 STARTING DISK SPACE MONITORING")
+        print("=" * 60)
+        
+        # ✅ NEW: Two-Way Sync! Poll Codex to see if humans closed any FIXED tickets
+        poll_codex_for_closures()
+
+        db_conn_proj = init_db_proj('mysql_ansible')
+        db_cursor_proj = db_conn_proj.cursor(buffered=True)
+
+        dag_end_date = datetime.now()
+       
+        all_disk_qry = f"""
+            SELECT t1.server_name, t1.filesystem, t1.size, t1.used, t1.avail, t1.use_percent, t1.mounted_on, t1.execution_date
+            FROM {disk_table} t1
+            JOIN (
+                SELECT server_name, mounted_on, MAX(execution_date) AS max_date
+                FROM {disk_table}
+                GROUP BY server_name, mounted_on
+            ) t2
+            ON t1.server_name = t2.server_name
+            AND t1.mounted_on = t2.mounted_on
+            AND t1.execution_date = t2.max_date
+            WHERE t1.mounted_on NOT LIKE '%/.snapshot/%'
+            ORDER BY t1.server_name, t1.use_percent DESC;
+        """
+
+        print(f"🔍 Executing query for latest disk metrics...")
+        db_cursor_proj.execute(all_disk_qry)
+        records = db_cursor_proj.fetchall()
+
+        if not records:
+            print("⚠️  No disk metrics found in database")
+            insert_job_log_alert(
+                vprojname,
+                dag_start_date,
+                dag_end_date,
+                vdag_id,
+                "Monitor Disks",
+                "No disk metrics available",
+                1,
+                None
+            )
+            return
+
+        print(f"✓ Found {len(records)} disk metric records")
+
+        # ✅ AGGREGATED BY SITE
+        sites_with_new_alerts = set()
+        sites_with_resend_alerts = set()
+        sites_with_escalation_alerts = set()
+        sites_with_fixes = set()
+        
+        alerts_by_site = {}
+        
+        #  TRACKER 
+        highest_severity_this_run = 2 # Defaults to warning, upgrades if a critical is found
+
+        print("\n" + "=" * 60)
+        print("📊 PROCESSING DISK METRICS")
+        print("=" * 60)
+
+        for record in records:
+            server_name = record[0]
+            filesystem = record[1]
+            size = record[2]
+            used = record[3]
+            avail = record[4]
+            use_percent = record[5]
+            mounted_on = record[6]
+            execution_date = record[7]
+
+            # Skip snapshots7    
+            if '/.snapshot/' in mounted_on:        
+                print(f"⏭️ Skipping snapshot filesystem: {server_name} - {mounted_on}")    
+                continue    
+               
+            site_name = get_site_from_server_name(server_name)
+
+            print(f"\n📌 {server_name} | {mounted_on} = {use_percent}%")
+
+            # Determine alert type
+            if use_percent >= THRESHOLD_CRITICAL:
+                alert_type = 'CRITICAL'
+                highest_severity_this_run = 1  # <-- Upgrades the DAG severity
+
+            elif use_percent > THRESHOLD_WARNING:
+                alert_type = 'WARNING'
+            else:
+                alert_type = 'NORMAL'
+
+            # Check alert status
+            alert_status, alert_info = insert_alert_status(
+                server_name,
+                site_name,
+                mounted_on,
+                use_percent,
+                THRESHOLD_WARNING,
+                THRESHOLD_CRITICAL
+            )
+
+            # Initialize site dict if needed
+            if site_name not in alerts_by_site:
+                alerts_by_site[site_name] = {
+                    'servers': {},
+                    'new_alerts': [],
+                    'resend_alerts': [],
+                    'escalation_alerts': [],
+                    'fixed_alerts': {}
+                }
+
+            # Initialize server dict if needed
+            if server_name not in alerts_by_site[site_name]['servers']:
+                alerts_by_site[site_name]['servers'][server_name] = {
+                    'new_metrics': [],
+                    'resend_metrics': [],
+                    'escalation_metrics': [],
+                    'fixed_metrics': {}
+                }
+
+            # Handle alert status
+            if alert_status == 'NEW' or alert_status == 'REOPENED':
+                sites_with_new_alerts.add(site_name)
+                
+                alerts_by_site[site_name]['servers'][server_name]['new_metrics'].append({
+                    'filesystem': filesystem,
+                    'size': size,
+                    'used': used,
+                    'avail': avail,
+                    'use_percent': use_percent,
+                    'mounted_on': mounted_on
+                })
+
+                insert_or_update_alert_data(
+                    server_name, dag_start_date, dag_end_date, vdag_id,
+                    mounted_on, use_percent, THRESHOLD_WARNING, alert_type,
+                    is_fixed=False,
+                    is_acknowledged=False
+                )
+
+                event_type = 'NEW' if alert_status == 'NEW' else 'REOPENED'
+                details = "Disk usage exceeded threshold" if alert_status == 'NEW' else "Disk usage exceeded threshold again (re-triggered)"
+                insert_run_failures(vdag_id, dag_start_date, event_type,
+                    server_name, mounted_on, use_percent, alert_type, details)
+
+                # ---------------------------------------------------------
+                # AUTOMATED CODEX TICKET (NEW)
+                # ---------------------------------------------------------
+                if use_percent >= THRESHOLD_CRITICAL: 
+                    print(f"🚨 CRITICAL THRESHOLD REACHED: Creating Codex ticket for {server_name}")
+                    
+                    # 1. Truncate the server name for the unique ID
+                    short_server = server_name[:5] 
+                    clean_mount = mounted_on.replace('/', '-').strip('-')
+                    if not clean_mount: clean_mount = "root" 
+                    unique_ticket_id = f"{vdag_id}_{short_server}_{clean_mount}" 
+
+                    
+                    # 2. Apply the Codex Markdown double-space formatting
+                    ticket_msg = (
+                        f"Automated ticket.\n\n"
+                        f"DAG: {vdag_id}  \n"
+                        f"Error: CRITICAL DISK ALERT  \n"
+                        f"Server: {server_name}  \n"
+                        f"Site: {site_name}  \n"
+                        f"Mount: {mounted_on}  \n"
+                        f"Usage: {use_percent}%  \n"
+                        f"Time: {dag_start_date.strftime('%Y-%m-%d %H:%M:%S')}"
+                    )
+                    
+                    new_id = create_codex_incident(
+                        vdag_id=unique_ticket_id, 
+                        error_message=ticket_msg, 
+                        execution_date=dag_start_date.strftime('%Y-%m-%d %H:%M:%S'), 
+                        vprojname=vprojname,
+                        site_name=site_name 
+                    )
+                    # HARDLINK: Save the new ID to the database column
+                    if new_id:
+                        link_ticket_to_db(server_name, mounted_on, new_id)
+
+            elif alert_status == 'UPDATED':
+                sites_with_resend_alerts.add(site_name)
+                
+                alerts_by_site[site_name]['servers'][server_name]['resend_metrics'].append({
+                    'filesystem': filesystem,
+                    'size': size,
+                    'used': used,
+                    'avail': avail,
+                    'use_percent': use_percent,
+                    'mounted_on': mounted_on
+                })
+
+                insert_or_update_alert_data(
+                    server_name, dag_start_date, dag_end_date, vdag_id,
+                    mounted_on, use_percent, THRESHOLD_WARNING, alert_type,
+                    is_fixed=False,
+                    is_acknowledged=False
+                )
+
+                insert_run_failures(vdag_id, dag_start_date, 'RESEND',
+                    server_name, mounted_on, use_percent, alert_type,
+                    "Alert still active - not acknowledged")
+
+                # ---------------------------------------------------------
+                # AUTOMATED CODEX TICKET (RESEND)
+                # ---------------------------------------------------------
+
+                # Generate unique ID for searching/creating
+                short_server = server_name[:5] 
+                clean_mount = mounted_on.replace('/', '-').strip('-')
+                if not clean_mount: clean_mount = "root" 
+                unique_ticket_id = f"{vdag_id}_{short_server}_{clean_mount}"
+
+                if use_percent >= THRESHOLD_CRITICAL: 
+                    print(f"🚨 CRITICAL THRESHOLD REACHED: Creating Codex ticket for {server_name}")
+                    
+                    ticket_msg = (
+                        f"Automated ticket.\n\n"
+                        f"DAG: {vdag_id}  \n"
+                        f"Error: CRITICAL DISK ALERT  \n"
+                        f"Server: {server_name}  \n"
+                        f"Site: {site_name}  \n"
+                        f"Mount: {mounted_on}  \n"
+                        f"Usage: {use_percent}%  \n"
+                        f"Time: {dag_start_date.strftime('%Y-%m-%d %H:%M:%S')}"
+                    )
+                    
+                    new_id = create_codex_incident(
+                        vdag_id=unique_ticket_id, 
+                        error_message=ticket_msg, 
+                        execution_date=dag_start_date.strftime('%Y-%m-%d %H:%M:%S'), 
+                        vprojname=vprojname,
+                        site_name=site_name 
+                    )
+                    if new_id:
+                        link_ticket_to_db(server_name, mounted_on, new_id)
+                else:
+                    # USAGE IS BETWEEN 86% and 94% (Warning territory)
+                    # Resolve the critical ticket from a previous run (keeps ticket ID linked)
+                    resolve_and_keep_ticket(server_name, mounted_on, 'OPEN')
+                    
+
+            elif alert_status == 'ACKNOWLEDGED_ESCALATED':
+                sites_with_escalation_alerts.add(site_name)
+                
+                alerts_by_site[site_name]['servers'][server_name]['escalation_metrics'].append({
+                    'filesystem': filesystem,
+                    'size': size,
+                    'used': used,
+                    'avail': avail,
+                    'use_percent': use_percent,
+                    'mounted_on': mounted_on
+                })
+
+                insert_or_update_alert_data(
+                    server_name, dag_start_date, dag_end_date, vdag_id,
+                    mounted_on, use_percent, THRESHOLD_WARNING, alert_type,
+                    is_fixed=False,
+                    is_acknowledged=False
+                )
+
+                insert_run_failures(vdag_id, dag_start_date, 'ESCALATION',
+                    server_name, mounted_on, use_percent, alert_type,
+                    "Acknowledged alert metric increased - Reopened")
+                
+                
+
+                # ---------------------------------------------------------
+                # AUTOMATED CODEX TICKET (ESCALATION)
+                # ---------------------------------------------------------
+                if use_percent >= THRESHOLD_CRITICAL: 
+                    print(f"🚨 CRITICAL THRESHOLD REACHED: Creating Codex ticket for {server_name}")
+                    
+                    short_server = server_name[:5] 
+                    clean_mount = mounted_on.replace('/', '-').strip('-')
+                    if not clean_mount: clean_mount = "root" 
+                    unique_ticket_id = f"{vdag_id}_{short_server}_{clean_mount}"
+                    
+                    ticket_msg = (
+                        f"Automated ticket.\n\n"
+                        f"DAG: {vdag_id}  \n"
+                        f"Error: CRITICAL DISK ALERT  \n"
+                        f"Server: {server_name}  \n"
+                        f"Site: {site_name}  \n"
+                        f"Mount: {mounted_on}  \n"
+                        f"Usage: {use_percent}%  \n"
+                        f"Time: {dag_start_date.strftime('%Y-%m-%d %H:%M:%S')}"
+                    )
+                    
+                    new_id = create_codex_incident(  
+                        vdag_id=unique_ticket_id, 
+                        error_message=ticket_msg, 
+                        execution_date=dag_start_date.strftime('%Y-%m-%d %H:%M:%S'), 
+                        vprojname=vprojname,
+                        site_name=site_name 
+                    )
+
+                    if new_id:
+                        link_ticket_to_db(server_name, mounted_on, new_id)
+
+            
+
+            elif alert_status == 'ACKNOWLEDGED_STILL_HIGH':
+                insert_or_update_alert_data(
+                    server_name, dag_start_date, dag_end_date, vdag_id,
+                    mounted_on, use_percent, THRESHOLD_WARNING, alert_type,
+                    is_fixed=False,
+                    is_acknowledged=True
+                )
+
+                insert_run_failures(vdag_id, dag_start_date, 'ACKNOWLEDGED',
+                    server_name, mounted_on, use_percent, alert_type,
+                    "Alert acknowledged - no email sent")
+
+                if use_percent < THRESHOLD_CRITICAL:
+                    # USAGE IS BETWEEN 86% and 94% (Warning territory)
+                    # Resolve the critical ticket since the emergency has passed
+                    resolve_and_keep_ticket(server_name, mounted_on, 'OPEN')
+
+            elif alert_status == 'FIXED':
+                sites_with_fixes.add(site_name)
+                
+                if server_name not in alerts_by_site[site_name]['servers']:
+                    alerts_by_site[site_name]['servers'][server_name] = {
+                        'new_metrics': [],
+                        'resend_metrics': [],
+                        'escalation_metrics': [],
+                        'fixed_metrics': {}
+                    }
+                
+                alerts_by_site[site_name]['servers'][server_name]['fixed_metrics'][mounted_on] = use_percent
+
+                insert_or_update_alert_data(
+                    server_name, dag_start_date, dag_end_date, vdag_id,
+                    mounted_on, use_percent, THRESHOLD_WARNING, alert_type,
+                    is_fixed=True,
+                    is_acknowledged=False
+                )
+
+                insert_run_failures(vdag_id, dag_start_date, 'FIXED',
+                    server_name, mounted_on, use_percent, alert_type,
+                    "Disk usage fell below threshold (Auto-Fixed)")
+                
+                # ---------------------------------------------------------
+                # AUTOMATED CODEX TICKET (AUTO-RESOLVE)
+                # ---------------------------------------------------------
+                resolve_and_keep_ticket(server_name, mounted_on, 'FIXED')
+
+
+        # ✅ Send emails by type
+        print("\n" + "=" * 60)
+        print("📧 SENDING EMAILS")
+        print("=" * 60)
+        
+        for site in sites_with_new_alerts:
+            alert_servers = {}
+            for server_name, metrics in alerts_by_site[site]['servers'].items():
+                if metrics['new_metrics']:
+                    alert_servers[server_name] = {'metrics': metrics['new_metrics']}
+            
+            if alert_servers:
+                send_alert_email_per_site(site, alert_servers, dag_start_date, email_type='NEW')
+
+        for site in sites_with_resend_alerts:
+            alert_servers = {}
+            for server_name, metrics in alerts_by_site[site]['servers'].items():
+                if metrics['resend_metrics']:
+                    alert_servers[server_name] = {'metrics': metrics['resend_metrics']}
+            
+            if alert_servers:
+                send_alert_email_per_site(site, alert_servers, dag_start_date, email_type='RESEND')
+
+        for site in sites_with_escalation_alerts:
+            alert_servers = {}
+            for server_name, metrics in alerts_by_site[site]['servers'].items():
+                if metrics['escalation_metrics']:
+                    alert_servers[server_name] = {'metrics': metrics['escalation_metrics']}
+            
+            if alert_servers:
+                send_alert_email_per_site(site, alert_servers, dag_start_date, email_type='ESCALATION')
+
+        for site in sites_with_fixes:
+            fixed_servers = {}
+            for server_name, metrics in alerts_by_site[site]['servers'].items():
+                if metrics['fixed_metrics']:
+                    fixed_servers[server_name] = metrics['fixed_metrics']
+            
+            if fixed_servers:
+                send_fixed_email_per_site(site, fixed_servers, dag_start_date)
+
+        # Count totals
+        # ---------------------------------------------------------
+        # ACCURATE IN-MEMORY COUNTING LOGIC
+        # ---------------------------------------------------------
+        # Count totals directly from our populated Python dictionaries
+        # This completely avoids database date/timezone mismatches!
+        
+        new_count = sum(
+            len(metrics['new_metrics'])
+            for site_data in alerts_by_site.values()
+            for metrics in site_data['servers'].values()
+        )
+        
+        resend_count = sum(
+            len(metrics['resend_metrics']) + len(metrics['escalation_metrics'])
+            for site_data in alerts_by_site.values()
+            for metrics in site_data['servers'].values()
+        )
+        
+        fixed_count = sum(
+            len(metrics['fixed_metrics'])
+            for site_data in alerts_by_site.values()
+            for metrics in site_data['servers'].values()
+        )
+        
+        # ---------------------------------------------------------
+        # UPDATED SEVERITY LOGGING LOGIC
+        # ---------------------------------------------------------
+        message = f"New alerts: {new_count}, Resent: {resend_count}, Fixed: {fixed_count}"
+        
+        print("\n" + "=" * 60)
+        print("📋 LOGGING RESULTS")
+        print("=" * 60)
+
+        if (new_count + resend_count) > 0:
+            # We have active alerts (Warning or Critical)
+            print(f"Status: WARNING/CRITICAL")
+            print(f"Message: {message}")
+            
+            insert_job_log_alert(
+                vprojname,
+                dag_start_date,
+                dag_end_date,
+                vdag_id,
+                message,          
+                "Monitor Disks", 
+                highest_severity_this_run,       # <--- uses the tracker!
+                "AirflowThresholdException"
+            )
+        else:
+            # Everything is completely NORMAL! No alerts.
+            print(f"Status: SUCCESS")
+            print(f"Message: {message}")
+            
+            # Standard SQL insert for a PASS. Defaults to Severity = NULL.
+            try:
+                db_conn_success = init_db_airflow()
+                db_cursor_success = db_conn_success.cursor()
+                
+                insert_pass_qry = """
+                    INSERT INTO t_app_job_log 
+                    (ProjName, DAG_StartDate, DAG_EndDate, DAG_id, Status, Message) 
+                    VALUES (%s, %s, %s, %s, 'PASS', %s)
+                """
+                db_cursor_success.execute(insert_pass_qry, (vprojname, dag_start_date, dag_end_date, vdag_id, message))
+                db_conn_success.commit()
+            except Exception as e:
+                print(f"Failed to log success: {e}")
+            finally:
+                if 'db_cursor_success' in locals(): db_cursor_success.close()
+                if 'db_conn_success' in locals(): db_conn_success.close()
+
+        print(f"\n✅ Monitoring complete. {message}")
+        print("=" * 60)
+
+
+    except Exception as err:
+        print(f"\n❌ Error in monitor_servers_disks: {err}")
+        traceback.print_exc()
+
+        insert_job_log_alert(
+            vprojname,
+            dag_start_date,
+            datetime.now(),
+            vdag_id,
+            f"DAG execution failed: {str(err)}",
+            "Monitor Disks",
+            3,
+            "AirflowException"
+        )
+
+        insert_run_failures(vdag_id, dag_start_date, 'ERROR', 'DAG', 'N/A', 0, 'ERROR', str(err))
+        raise
+    finally:
+        try:
+            if db_cursor_proj:
+                db_cursor_proj.close()
+        except Exception:
+            pass
+        try:
+            if db_conn_proj:
+                db_conn_proj.close()
+        except Exception:
+            pass
+
+
+# ============== DAG DEFINITION ==============
+default_args = {
+    "owner": "Airflow",
+    "start_date": datetime(2024, 6, 15),
+    "depends_on_past": False,
+    "email_on_failure": False,
+    "email_on_retry": False,
+    "email": email_list,
+    "retries": 0,
+    "on_failure_callback": lambda context: manage_exception_automated(context, vprojname)
+}
+
+with DAG(
+    dag_id="monitor_disks_ansible",
+    schedule_interval="0 0,6 * * *",
+    default_args=default_args,
+    max_active_runs=1,
+    catchup=False
+) as dag:
+    monitor_servers_disks()
