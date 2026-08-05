@@ -1,0 +1,727 @@
+from shared_funcs.database_connectors import init_db_airflow
+from airflow.utils.email import send_email
+from datetime import datetime, timedelta
+from airflow.models import Variable
+from tabulate import tabulate
+from zoneinfo import ZoneInfo
+import requests
+import json
+
+
+############################################################
+# Alert Management Changes below
+############################################################
+
+class AirflowAlertException(Exception):
+    '''
+    Inherits from the base exception class from Python. We are adding Category <str> and Severity <int> to the alert message.
+    Example Use: raise AirflowAlertException("More than 3 Watchdog Scripts are running. Please check.","Output Data Freshness",1)
+
+    Valid Categories = "Input Data Freshness", "Output Data Freshness", "Data Pipeline", "Data Quality", "Others", "Model Performance", "Error Log Detected"
+
+    Valid Severities = 1 (Immediate Action Required), 2 (Investigation by Developer and MNT Team), 3 (Investigation by MNT Team), 4 (Automatic Recovery)
+    '''
+    VALID_CATEGORIES = [
+        "Input Data Freshness",
+        "Output Data Freshness",
+        "Data Pipeline",
+        "Data Quality",
+        "Model Performance",
+        "Error Log Detected",
+        "Others"
+    ]
+
+    VALID_SEVERITIES = [1,2,3,4]
+
+    def __init__(self, message: str, category: str, severity: int):
+
+        if not isinstance(category, str):
+            raise TypeError(f"Expected 'category' to be a string, got {type(category).__name__}")
+        if category not in self.VALID_CATEGORIES:
+            raise ValueError(f"Invalid category '{category}'. Valid categories are: {', '.join(self.VALID_CATEGORIES)}")
+        if not isinstance(severity, int):
+            raise TypeError(f"Expected 'severity' to be an integer, got {type(severity).__name__}")
+        if severity not in self.VALID_SEVERITIES:
+            raise ValueError(f"Invalid severity '{severity}'. Valid severity values are: {', '.join(self.VALID_SEVERITIES)}")
+
+        super().__init__(message)
+        self.category = category
+        self.severity = severity
+
+
+
+class AirflowThresholdException(Exception):
+    """
+    Custom exception for metric breaches (e.g., Disk Space, CPU usage). 
+    """
+    # 👇 Added severity: int = 1 to the parameters
+    def __init__(self, metric_name: str, current_value: float, threshold_limit: float, server_name: str, site_name: str = None, severity: int = 1):
+        self.metric_name = metric_name
+        self.current_value = current_value
+        self.threshold_limit = threshold_limit
+        self.server_name = server_name
+        self.site_name = site_name
+        self.severity = severity     # <--- Saves the severity for the handler to use!
+        
+        # Build the standard error message automatically
+        self.generated_message = f"THRESHOLD BREACH: {server_name} hit {current_value}% on {metric_name} (Limit: {threshold_limit}%)"
+        super().__init__(self.generated_message)
+
+
+
+def manage_success(context, vprojname, alert_flag =0):
+    """
+    This is the entry point for all DAGs that succeed.
+    It is meant as a on_success_callback for DAGS.
+    Context is an airflow dictionary sent automatically.
+    Reference: https://airflow.apache.org/docs/apache-airflow/stable/templates-ref.html (For the Context Dictionary)
+
+    Logic: 
+    1) Parse the DAG's context
+    2) Log into t_app_job_log
+    """
+    if alert_flag == 0:
+        try:  
+
+            db_conn_airflow = init_db_airflow()       
+            db_cursor_airflow = db_conn_airflow.cursor()
+
+            print("Context dictionary: ", context)
+
+            print("Start_Date: ", context['dag_run'].start_date)
+
+
+            # Pulled from the context, automatically set.
+            vdag_id = context['dag'].dag_id
+
+            # Assume start_date_utc is a timezone-aware datetime in UTC -> ZoneInfo manages the DST and all the headaches.
+            dag_start_date = context['dag_run'].start_date.astimezone(ZoneInfo("Europe/Paris"))
+            #Remove TZ info
+            dag_start_date = dag_start_date.replace(tzinfo=None)
+
+            print("start_date_paris_naive: ", dag_start_date)
+
+
+            dag_end_date = datetime.now() 
+
+            
+
+
+            print(vprojname, dag_start_date, dag_end_date, vdag_id, 'PASS')
+
+            insert_qry = "INSERT INTO t_app_job_log "
+            insert_qry = insert_qry + "(ProjName, DAG_StartDate, DAG_EndDate, DAG_id, Status) VALUES "
+            insert_qry = insert_qry + "(%s, %s, %s, %s, %s)"
+            
+            print(insert_qry)
+            db_cursor_airflow.execute(insert_qry, (vprojname, dag_start_date, dag_end_date, vdag_id, 'PASS'))
+            db_conn_airflow.commit()
+            print("Inserted to Airflow DB, t_app_job_log - Success")
+
+        except Exception as err:
+            raise
+        finally:  
+            db_cursor_airflow.close()
+            if db_conn_airflow.is_connected():
+                db_conn_airflow.close()
+    else:
+        print(f"alert_flag received was {alert_flag}. DAG ran successfully but there was a manual alert inserted.")
+        pass
+
+
+def insert_job_log_failure(arg_projname, arg_dag_startdate, arg_dag_enddate, arg_dag_id, arg_errormsg, arg_exceptiontype):
+    try:  
+        print("Connecting to Airflow DB")
+        db_conn_airflow = init_db_airflow()       
+        db_cursor_airflow = db_conn_airflow.cursor()      
+
+        print("Inserting ERROR into Airflow DB, table: t_app_job_log")
+        insert_qry = "INSERT INTO t_app_job_log "
+        insert_qry = insert_qry + "(ProjName, DAG_StartDate, DAG_EndDate, DAG_id, Status, Message, exception_type, Severity) VALUES "
+        insert_qry = insert_qry + "(%s, %s, %s, %s, 'FAIL', %s, %s, 3)" # Severity for a FAIL is default to 3, where Maintenance Team must investigate.
+
+        print(insert_qry)
+        db_cursor_airflow.execute(insert_qry, (arg_projname, arg_dag_startdate, arg_dag_enddate, arg_dag_id, arg_errormsg, arg_exceptiontype))
+        db_conn_airflow.commit()
+        print(arg_projname, arg_dag_startdate, arg_dag_enddate, arg_dag_id, arg_errormsg, arg_exceptiontype)
+        print("Inserted to Airflow DB, t_app_job_log - ERROR")
+
+    except Exception as err:
+        raise
+    finally:  
+        db_cursor_airflow.close()
+
+        if db_conn_airflow.is_connected():
+            db_conn_airflow.close()
+
+def insert_job_log_alert(arg_projname, arg_dag_startdate, arg_dag_enddate, arg_dag_id, arg_errormsg, arg_category, arg_severity, arg_exceptiontype):
+    try:  
+        print("Connecting to Airflow DB")
+        db_conn_airflow = init_db_airflow()       
+        db_cursor_airflow = db_conn_airflow.cursor()      
+
+        print("Inserting ALERT into Airflow DB, table: t_app_job_log")
+        insert_qry = "INSERT INTO t_app_job_log "
+        insert_qry = insert_qry + "(ProjName, DAG_StartDate, DAG_EndDate, DAG_id, Status, Message, Category, Severity, exception_type) VALUES "
+        insert_qry = insert_qry + "(%s, %s, %s, %s, 'ALERT', %s, %s, %s, %s)"
+
+        print(insert_qry)
+        db_cursor_airflow.execute(insert_qry, (arg_projname, arg_dag_startdate, arg_dag_enddate, arg_dag_id, arg_errormsg, arg_category, arg_severity, arg_exceptiontype))
+        db_conn_airflow.commit()
+        print(arg_projname, arg_dag_startdate, arg_dag_enddate, arg_dag_id, arg_errormsg, arg_category, arg_severity, arg_exceptiontype)
+        print("Inserted to Airflow DB, t_app_job_log - ALERT")
+
+    except Exception as err:
+        raise
+    finally:  
+        db_cursor_airflow.close()
+
+        if db_conn_airflow.is_connected():
+            db_conn_airflow.close()
+
+def get_last_hour_summary(vdag_id, dag_start_date):
+    try:  
+        print("Connecting to Airflow DB")
+        db_conn_airflow = init_db_airflow()       
+        db_cursor_airflow = db_conn_airflow.cursor()
+
+        one_hour_before = dag_start_date - timedelta(hours=1)
+        one_hour_before_str = one_hour_before.strftime('%Y-%m-%d %H:%M:%S')
+
+
+        select_qry = f"SELECT * from t_app_job_log where dag_id ='{vdag_id}' and dag_startdate >= '{one_hour_before_str}' order by DAG_StartDate desc"
+
+        db_cursor_airflow.execute(select_qry)
+        # Fetch the results
+        results = db_cursor_airflow.fetchall()
+    
+        return results
+
+    except Exception as err:
+        raise
+    finally:  
+        db_cursor_airflow.close()
+
+        if db_conn_airflow.is_connected():
+            db_conn_airflow.close()
+
+def get_managed_dags():
+    try:  
+        print("Connecting to Airflow DB")
+        db_conn_airflow = init_db_airflow()       
+        db_cursor_airflow = db_conn_airflow.cursor()
+
+
+        select_qry = f"SELECT distinct dag_id from t_dags_to_monitor"
+
+        db_cursor_airflow.execute(select_qry)
+        # Fetch the results
+        managed_dags = db_cursor_airflow.fetchall()
+        if len(managed_dags) > 0:
+            #Check if there is at least 1 managed dag.
+            managed_dags_list = [item[0] for item in managed_dags]
+            print(f"List of managed dags: {managed_dags_list}")
+        else:
+            print("No dags in t_dags_to_monitor")
+            managed_dags_list = []
+    
+        return managed_dags_list
+
+    except Exception as err:
+        print("Error while retrieving the managed_dags. Returning an empty list")
+        return []
+    finally:  
+        db_cursor_airflow.close()
+
+        if db_conn_airflow.is_connected():
+            db_conn_airflow.close()
+
+
+
+def check_existing_open_incident(vdag_id):
+    """
+    Searches Codex to see if an Open/New incident already exists for this DAG.
+    Returns True if an open ticket exists, False if not.
+    """
+    tracker_id = 41068
+    # Sorting by most recent first. Limit to 50 to keep the API call fast.
+    url = f'https://codex.cro.st.com/api/trackers/{tracker_id}/artifacts?limit=50&order=desc' 
+    
+    headers = {
+        'Content-type': 'application/json',
+        'X-Auth-AccessKey': Variable.get("codex_api_key") 
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, verify=False)
+        response.raise_for_status()
+        artifacts = response.json()
+        
+        for artifact in artifacts:
+            title = artifact.get('title', '')
+            status = artifact.get('status', '')
+            
+            # Check if this exact DAG ID is in the ticket title AND the ticket is unresolved
+            if vdag_id in title and status in ['New', 'Unconfirmed', 'Reopened']:
+                print(f"Alert Deduplication: Open ticket already exists for {vdag_id}. Skipping creation.")
+                return artifact.get('id')   # <--- CHANGED: Now returns the Artifact ID
+                
+        return None  # No existing open tickets found
+        
+    except Exception as e:
+        print(f"Failed to check existing tickets: {e}. Defaulting to create new ticket.")
+        return False # If the search fails, default to False so we still generate an alert
+
+
+def create_codex_incident(vdag_id, error_message, execution_date, vprojname, site_name=None):
+    """Helper function to dynamically create a critical Codex ticket upon DAG failure."""
+    
+    # ---------------------------------------------------------
+    # WORKFLOW STEP 1: Search Codex for existing open alert
+    # ---------------------------------------------------------
+    existing_id = check_existing_open_incident(vdag_id)
+    if existing_id:
+        return existing_id # Skip creation and return existing ID
+
+    # ---------------------------------------------------------
+    # WORKFLOW STEP 2: Intelligent Routing Dictionaries
+    # ---------------------------------------------------------
+    # Map your specific Airflow project names to Codex Site IDs
+
+    if site_name:
+        server_site_mapping = {
+            "MUAR": 907173,
+            "MALTA": 907172,
+            "BOUSKOURA": 907170,
+            "SHENZHEN": 907174,
+            "CALAMBA": 907171,
+            "TOA PAYOH": 1091508
+        }
+        dynamic_site_id = server_site_mapping.get(site_name.upper(), 907172)   #set default to malta
+        dynamic_category_id = 907075 # Defaults to infrastructure 
+
+
+    # Map based on Airflow Project Name (for standard DAGs)
+    else:
+        site_mapping = {
+            "Project_ShenZhen": 907174,
+            "Project_Muar": 907173,
+            "Project_Malta": 907172,
+            "Project_Bouskoura": 907170,
+            "Project_Calamba": 907171,
+            "Project_Rennes": 976898,
+            "Project_ToaPayoh": 1091508
+        }
+        
+        category_mapping = {
+            "Project_Infra": 907075, # Infrastructure
+            "Project_DS": 907077,     # Data Science
+            "Project_DE": 907076     # Data Engineering
+        }
+
+        # Fetch the correct IDs using .get(), providing a safe default if the project isn't found
+        dynamic_site_id = site_mapping.get(vprojname, 907174) # Defaults to ShenZhen
+        dynamic_category_id = category_mapping.get(vprojname, 907075) # Defaults to Infrastructure
+
+    # ---------------------------------------------------------
+    # WORKFLOW STEP 3: Create Incident
+    # ---------------------------------------------------------
+    try:
+        tracker_id = 41068
+        url = 'https://codex.cro.st.com/api/artifacts'
+        
+        headers = {
+            'Content-type': 'application/json',
+            'X-Auth-AccessKey': Variable.get("codex_api_key") 
+        }
+        
+        expected_completion = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+
+        payload = {
+            "tracker": { "id": tracker_id },
+            "values": [
+                {
+                    "field_id": 1004837, # Assigned to
+                    "bind_value_ids": [51723,46831,52717] # Lay Koon PNG, weiyoung, victor
+                },
+                {
+                    "field_id": 1004834,  # Status
+                    "bind_value_ids": [907052]   #hardcoded to new 
+                },
+                {
+                    "field_id": 1149644,  # Severity
+                    "bind_value_ids": [1036903] # "Critical"
+                },
+                {
+                    "field_id": 1004845,  # Expected Completion Date
+                    "value": expected_completion
+                },
+                {
+                    "field_id": 1004823, # Summary
+                    "value": f"CRITICAL FAILURE: DAG {vdag_id}"
+                },
+                {
+                    "field_id": 1004897,  # Site(s) Affected
+                    "bind_value_ids": [dynamic_site_id]   # dynamically assigned
+                },
+                {
+                    "field_id": 1004824,  # Issue Description
+                    "value": f"Automated ticket.\n\nDAG: {vdag_id}\nError: {error_message}\nTime: {execution_date}"
+                },
+                {
+                    "field_id": 1004830,  # Issue Category
+                    "bind_value_ids": [dynamic_category_id] # dynamically assigned
+                },
+                {
+                    "field_id": 1004836,  # Resolution
+                    "bind_value_ids": [907071]   #hardcoded to later
+                }
+            ]
+        }
+
+        response = requests.post(url, headers=headers, data=json.dumps(payload), verify=False)
+        response.raise_for_status()
+        
+        # Extract the integer ID from the API response
+        new_artifact_id = response.json().get('id')
+        print(f"Successfully created Critical Incident ticket for {vprojname}. Artifact ID: {new_artifact_id}")
+        
+        return new_artifact_id
+        
+    except Exception as e:
+        print(f"Failed to create Codex ticket: {e}")
+        return None
+
+def close_codex_incident(artifact_id):
+    """
+    Closes a specific Codex ticket via PUT request using its Artifact ID.
+    """
+    if not artifact_id:
+        print("No artifact ID provided to close.")
+        return
+
+    try:
+        url = f'https://codex.cro.st.com/api/artifacts/{artifact_id}'
+        
+        headers = {
+            'Content-type': 'application/json',
+            'X-Auth-AccessKey': Variable.get("codex_api_key") 
+        }
+        
+        # Payload to update the Status field to 'Closed'
+        # Note: 1004834 is your Status field. 
+        # Ensure 907056 matches your actual Tuleap ID for the "Closed"  status dropdown!
+        payload = {
+            "values": [
+                {
+                    "field_id": 1004834,  # Status
+                    "bind_value_ids": [907056]   # ID for Closed 
+                }
+            ]
+        }
+
+        response = requests.put(url, headers=headers, data=json.dumps(payload), verify=False)
+        response.raise_for_status()
+        
+        print(f"Successfully closed Codex ticket #{artifact_id}")
+        
+    except Exception as e:
+        print(f"Failed to close Codex ticket #{artifact_id}: {e}")
+
+def resolve_codex_incident(artifact_id):
+    """
+    Updates a specific Codex ticket via PUT request to a 'Fixed' or 'Resolved' state.
+    """
+    if not artifact_id:
+        print("No artifact ID provided to resolve.")
+        return
+
+    try:
+        url = f'https://codex.cro.st.com/api/artifacts/{artifact_id}'
+        
+        headers = {
+            'Content-type': 'application/json',
+            'X-Auth-AccessKey': Variable.get("codex_api_key") 
+        }
+        
+        # Payload to update the Status field. 
+        # Note: 1004834 is your Status field. 
+        payload = {
+            "values": [
+                {
+                    "field_id": 1004834,  # Status
+                    "bind_value_ids": [907055]   # ID for Fixed..CHANGE IT TO ACTUAL ID 
+                }
+            ]
+        }
+
+        response = requests.put(url, headers=headers, data=json.dumps(payload), verify=False)
+        response.raise_for_status()
+        
+        print(f"Successfully resolved Codex ticket #{artifact_id}")
+        
+    except Exception as e:
+        print(f"Failed to resolve Codex ticket #{artifact_id}: {e}")
+
+def update_codex_incident(artifact_id, updated_message):
+    """
+    Updates the Issue Description of an existing Codex ticket.
+    """
+    if not artifact_id:
+        return
+
+    try:
+        url = f'https://codex.cro.st.com/api/artifacts/{artifact_id}'
+        
+        headers = {
+            'Content-type': 'application/json',
+            'X-Auth-AccessKey': Variable.get("codex_api_key") 
+        }
+        
+        # Field 1004824 is your Issue Description
+        payload = {
+            "values": [
+                {
+                    "field_id": 1004824,  
+                    "value": updated_message
+                }
+            ]
+        }
+
+        response = requests.put(url, headers=headers, data=json.dumps(payload), verify=False)
+        response.raise_for_status()
+        
+        print(f"Successfully updated description for Codex ticket #{artifact_id}")
+        
+    except Exception as e:
+        print(f"Failed to update Codex ticket #{artifact_id}: {e}")
+
+
+
+
+
+def manage_exception_automated(context, vprojname):  
+    '''
+    This is the entry point for DAGs with any alerts/errors.
+    It is meant as a on_failure_callback for DAGS.
+    Context is an airflow dictionary sent automatically.
+    Reference: https://airflow.apache.org/docs/apache-airflow/stable/templates-ref.html (For the Context Dictionary)
+
+    Logic: 
+    1) Parse the DAG's context
+    2) Log into t_app_job_log (Depending on the whether it is ERROR/ALERT)
+    3) Check whether to send email (Depending on t_dags_to_monitor). If dag is not in t_dags_to_monitor, we send the alert immediately (if it is not a weekend). Else, batch the alerts.
+    '''
+
+    ##########################################################
+    # Step 1: Parse the Context to pull out Exception Type, Message, Start Date and Email List.
+    ##########################################################
+
+     # For checking what is passed in airflow context
+    print("Context dictionary: ", context)
+    #Extract the recipients - This must be set properly in default_args in the parent DAG
+    email_list = context['dag'].default_args['email']
+    # Extract the DAG_ID from the context.
+    vdag_id = context['dag'].dag_id
+    #Assumption: Server Time Zone is in UTC+0
+    dag_start_date = context['dag_run'].start_date.astimezone(ZoneInfo("Europe/Paris"))
+    #Remove TZ info
+    dag_start_date = dag_start_date.replace(tzinfo=None)
+
+    # Extract the Exception
+    e = context.get("exception")
+    #Extract the message
+    vexception = str(e)[0:300] 
+    # Extract the exception type
+    exception_type = type(e).__name__
+    print(f"Exception type: {exception_type}") # Print for debugging
+    print(f"Exception Message: {vexception}") # Print for debugging
+
+
+    dag_end_date = datetime.now() 
+
+    ##########################################################
+    # Step 2: Log the Error/Alert into t_app_job_log and prepare email title + body
+    ##########################################################
+
+    ### This if-else branch checks if this exception is an Alert or an Error. either way, we insert an entry into the Airflow DB for tracking purposes.
+    
+    if isinstance(e, AirflowAlertException):
+        # The error is an AirflowAlertException. There is an alert.
+        airflow_site = 'MLT'
+        category = e.category
+        severity = e.severity
+
+        # Insert an Alert to t_app_job_log
+        insert_job_log_alert(vprojname, dag_start_date, dag_end_date, vdag_id, vexception, category, severity, exception_type)
+
+        if severity == 1:
+            print(f"Critical Alert Detected (Severity 1). Generating Codex Incident...")
+            create_codex_incident(vdag_id, vexception, dag_start_date.strftime('%Y-%m-%d %H:%M:%S'), vprojname)
+        else:
+            print(f"Alert Detected (Severity {severity}). Skipping Codex Incident creation.")
+   
+
+
+        email_title = "Airflow ALERT: " + "- " + vdag_id
+        email_body = f"""
+            Alert logged.<br>
+            Project: {vprojname}<br>
+            Dag ID : {vdag_id}<br>
+            Alert Message: {vexception}<br>
+            Category: {category}<br>
+            Severity: {severity}<br>
+            <br>
+            <br>
+            <i>Receiving too many alerts? Please acknowledge them and Pause the DAG </i>
+            <a href="http://muasxv4106.mua.st.com:3000/alerts/update-dag/dag_id={vdag_id}&airflow_site={airflow_site}">Here</a>
+    
+            """
+    elif isinstance(e, AirflowThresholdException):
+        # ---------------------------------------------------------
+        # NEW LOGIC: Handle Threshold-Based DAGs (e.g., Ansible Monitors)
+        # ---------------------------------------------------------
+        print(f"Threshold breach detected for {e.server_name}. Generating Automated Codex Incident...")
+        
+        insert_job_log_alert(vprojname, dag_start_date, dag_end_date, vdag_id, e.generated_message, "Infrastructure", e.severity, exception_type)
+        # 1. Format the strings for Codex
+        # Extract the first 5 characters of the server (e.g., 'kirsx00301.kir.st.com' -> 'kirsx')
+        short_server = e.server_name[:5]
+        clean_mount = e.metric_name.replace('/', '-').strip('-')
+        if not clean_mount: clean_mount = "root"
+        unique_ticket_id = f"{vdag_id}_{short_server}_{clean_mount}" 
+        
+        # Note the two spaces before each \n This forces Codex Markdown to render the line breaks.
+        ticket_msg = (
+            f"Automated ticket.\n\n"
+            f"DAG: {vdag_id}  \n"
+            f"Error: CRITICAL METRIC ALERT  \n"
+            f"Server: {e.server_name}  \n"
+            f"Site: {e.site_name}  \n"
+            f"Mount: {e.metric_name}  \n"
+            f"Usage: {e.current_value}%  \n"
+            f"Time: {dag_start_date.strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        #  2. ONLY Fire the Codex function if it is a Critical Alert
+        if e.severity == 1:
+            print("Severity 1: Generating Automated Codex Incident...")
+            create_codex_incident(
+                vdag_id=unique_ticket_id, 
+                error_message=ticket_msg, 
+                execution_date=dag_start_date.strftime('%Y-%m-%d %H:%M:%S'), 
+                vprojname=vprojname,
+                site_name=e.site_name
+            )
+        else:
+            print(f"Severity {e.severity}: Skipping Codex ticket creation.")
+        
+        # 3. Format the Email Alert
+        email_title = f"Airflow METRIC ALERT: - {vdag_id} - {e.server_name}"
+        email_body = f"""
+            Threshold breach logged.<br>
+            Project: {vprojname}<br>
+            Dag ID : {vdag_id}<br>
+            Server: {e.server_name}<br>
+            Metric: {e.metric_name}<br>
+            Current Value: {e.current_value}% (Limit: {e.threshold_limit}%)<br>
+            """
+    else:
+        # There is a general ERROR in the Airflow DAG. This means Maintenance Team should check.
+
+        # Insert a Failure to t_app_job_log
+        insert_job_log_failure(vprojname, dag_start_date, dag_end_date, vdag_id, vexception, exception_type)
+        email_title = "Airflow ERROR: " + "- " + vdag_id
+        email_list = "TMQ_MDS_Backend_Maintenance_Team@list.st.com" #Alter the recipients to ourselves only.
+        #email_list = 'laykoon.png-ext@st.com'
+        # email_list='deyuan.chong-ext@st.com'
+        email_body = f"""
+                There is an error in the following DAG. Maintenance Team, please check.<br>
+                Error logged. <br>
+                Project: {vprojname}<br>
+                Dag ID : {vdag_id}<br>
+                Error Message: {vexception}<br>
+                Exception Type: {exception_type}<br>
+                """
+    
+    ##########################################################
+    # Step 3: Determine whether to send an email immediately or rely on global email alert.
+    ##########################################################
+
+    # If the vdag_id is in managed_dags, global_email_alert takes care of it.
+    managed_dags = get_managed_dags()
+
+    # Else, we need to handle the email alerts in this callback.
+    if vdag_id not in managed_dags:
+
+        ### This if-else branch checks if this is a weekday/weekend and performs summarization if it is a weekend.
+        day_of_week = dag_start_date.weekday()
+        print("Day of Week: ", day_of_week)
+
+        minute_start = dag_start_date.minute # Minute that the DAG was first started
+        print("Minute that the DAG was started: ", minute_start)
+
+        # Check if the current day is a weekday (Monday=0, Sunday=6)
+        if day_of_week < 5:
+            print("Weekday Logic, sending email without summary")
+            send_email(email_list, email_title, email_body)
+        
+        # Check if the current day is a weekend (Saturday=5, Sunday=6) and the minute is less than 3 (first run of the hour)
+        elif day_of_week >= 5 and minute_start <= 3:
+            print("Weekend Logic, sending email hourly with summary")
+
+            table_records = get_last_hour_summary(vdag_id, dag_start_date)
+
+            print("Number of Summarized Records: ", len(table_records))
+
+            print(table_records)
+            summary_table = tabulate(table_records,
+                                    headers=["Project Name","DAG Start Date", "DAG End Date","DAG Id", "Category", "Severity",  "Message", "Status", "Exception Type"],
+                                    tablefmt='html')
+
+            
+
+            #Beautifying the table                                     
+            summary_table = "<style>table, th, td {border: 1px solid black; border-collapse: collapse;} th, td {padding: 5px;} th {text-align: left;} </style>" + summary_table 
+            email_title = "[Weekend Summary] - " + email_title
+            email_body = f"""
+                        [Past Hour Summary]<br>
+                        Last Hour summary of Project: {vprojname} | Dag ID : {vdag_id} (Latest Monitoring First)<br><br>
+                        {summary_table}
+                        """
+
+            send_email(email_list, email_title, email_body)
+        else:
+            pass # Don't send any emails if its not on a weekday and the first hour of the weekend.
+    
+
+
+def dag_manage_exception(context, vprojname):  
+    '''
+    This is the entry point for DAGs with any alerts/errors.
+    It is meant as a on_failure_callback for DAG-LEVEL FAILURES. IT MEANS that there could be multiple task(s) that fail.
+    Context is an airflow dictionary sent automatically.
+    Reference: https://airflow.apache.org/docs/apache-airflow/stable/templates-ref.html (For the Context Dictionary)
+
+    Logic: 
+    1) Parse the DAG's context
+    2) Log into t_app_job_log (Depending on the whether it is ERROR/ALERT)
+    3) Check whether to send email (Depending on t_dags_to_monitor)
+    '''
+
+    ##########################################################
+    # Step 1: Parse the Context to pull out Exception Type, Message, Start Date and Email List.
+    ##########################################################
+
+    dag_run = context['dag_run']
+    dag = context['dag']
+    # session = context['session']  # if available, or use provide_session decorator
+    # For checking what is passed in airflow context
+    print("Context dictionary: ", context)
+
+    # Query all failed task instances for this DAG run
+    failed_tis = dag_run.get_task_instances(state='failed')
+
+    exceptions = []
+    for ti in failed_tis:
+        print(f"Details for the failed Task: {ti.task_id}")
+        exceptions.append(ti.task_id)
