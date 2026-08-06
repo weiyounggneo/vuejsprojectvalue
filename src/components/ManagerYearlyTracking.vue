@@ -933,6 +933,7 @@ export default {
 
       // Data State
       rows: [],
+      siteTargets: [], // Holds the exact expected targets from DB
       selectedRow: null,
 
       // Columns / Table refresh control
@@ -1071,6 +1072,7 @@ export default {
     // TREND CHARTS LOGIC (Filtered by Site Button)
     // ==========================================
     analyticsSiteOptions() {
+      // Dynamic lists for buttons but ensuring we remove any bad DB entries that equal "ALL"
       return [...new Set(this.rows.map(r => r.sites).filter(site => site && site.toUpperCase() !== 'ALL'))].sort();
     },
     filteredSiteTrendRows() {
@@ -1089,9 +1091,16 @@ export default {
         return Number((total / 1000000).toFixed(3));
       });
 
-      const expected = actual.map((value, index) => {
-        const dummyFactor = 1.08 + (index * 0.02);
-        return Number((value * dummyFactor).toFixed(3));
+      // Calculate Expected Values directly from DB targets
+      const expected = this.trackingYears.map(year => {
+        let yearTargets = this.siteTargets.filter(t => t.target_year === year);
+        
+        if (this.siteTrendConfig.selectedSite !== 'ALL') {
+          yearTargets = yearTargets.filter(t => t.site === this.siteTrendConfig.selectedSite);
+        }
+
+        const totalExpected = yearTargets.reduce((sum, t) => sum + Number(t.expected_value), 0);
+        return Number((totalExpected / 1000000).toFixed(3));
       });
 
       // Cumulative Calculations
@@ -1124,17 +1133,17 @@ export default {
           toolbar: { show: false },
           animations: { enabled: false }
         },
-        colors: ['#1f5fa8', '#d93025'], // Blue for Actual, Red for Expected
+        colors: ['#05204a', '#037d50'], // Blue for Actual, Red for Expected
         xaxis: {
           categories: this.siteTrendData.labels,
           title: { text: 'Year' },
-          labels: { style: { fontSize: '15px', fontWeight: 600 } }
+          labels: { style: { fontSize: '13px', fontWeight: 600 } }
         },
         yaxis: {
           title: { text: 'Cumulative Value (Millions)' },
           labels: {
             formatter: value => `${Number(value).toFixed(1)}M`,
-            style: { fontSize: '15px', fontWeight: 600 }
+            style: { fontSize: '13px', fontWeight: 600 }
           }
         },
         stroke: {
@@ -1172,17 +1181,17 @@ export default {
           toolbar: { show: false },
           animations: { enabled: false }
         },
-        colors: ['#17a2b8', '#d93025'], // Teal for Actual, Red for Expected
+        colors: ['#05204a', '#037d50'], // Teal for Actual, Red for Expected
         xaxis: {
           categories: this.siteTrendData.labels,
           title: { text: 'Year' },
-          labels: { style: { fontSize: '15px', fontWeight: 600 } }
+          labels: { style: { fontSize: '13px', fontWeight: 600 } }
         },
         yaxis: {
           title: { text: 'Annualized Value (Millions)' },
           labels: {
             formatter: value => `${Number(value).toFixed(1)}M`,
-            style: { fontSize: '15px', fontWeight: 600 }
+            style: { fontSize: '13px', fontWeight: 600 }
           }
         },
         stroke: {
@@ -1245,13 +1254,12 @@ export default {
       const years = [this.currentYear, this.currentYear + 1, this.currentYear + 2];
       
       return years.map(year => {
-        // Actual Value for the year
+        // Actual Value for the year across all rows
         const actual = this.rows.reduce((sum, row) => sum + (Number(row[`year${year}`]) || 0), 0);
         
-        // Expected Value Dummy Logic (matches the chart logic)
-        const timelineIdx = this.trackingYears.indexOf(year);
-        const dummyFactor = timelineIdx >= 0 ? 1.08 + (timelineIdx * 0.02) : 1.10;
-        const target = actual * dummyFactor;
+        // Expected target for the year across all sites
+        const yearTargets = this.siteTargets.filter(t => t.target_year === year);
+        const target = yearTargets.reduce((sum, t) => sum + Number(t.expected_value), 0);
 
         return {
           year: year,
@@ -1451,7 +1459,7 @@ export default {
           show: true,
           position: 'bottom',
           horizontalAlign: 'center',
-          fontSize: '14px',
+          fontSize: '12px',
           fontWeight: 500,
           markers: {
             width: 10,
@@ -1552,16 +1560,26 @@ export default {
     async fetchTable() {
       this.isPageLoading = true;
       try {
-        const response = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/manager-yearly`);
-        if (!response.ok) throw new Error('Failed to fetch data');
+        const [projectsRes, targetsRes] = await Promise.all([
+          this.apiFetch(`${process.env.VUE_APP_API_URL}/api/manager-yearly`),
+          this.apiFetch(`${process.env.VUE_APP_API_URL}/api/manager-site-targets`)
+        ]);
 
-        const data = await response.json();
+        if (!projectsRes.ok) throw new Error('Failed to fetch project data');
+        if (!targetsRes.ok) throw new Error('Failed to fetch target data');
+
+        const data = await projectsRes.json();
+        const targetsData = await targetsRes.json();
         
         // Ensure projectStatus maps correctly from backend project_status
         this.rows = data.map(row => ({
           ...row,
           projectStatus: row.projectStatus || row.project_status
         }));
+        
+        // Save the raw targets lookup table into Vue state
+        this.siteTargets = targetsData;
+
       } catch (err) {
         console.error(err);
       } finally {
@@ -2319,10 +2337,10 @@ export default {
   font-weight: 500;
   opacity: 0.95;
 }
-.bg-overall { background: linear-gradient(135deg, #1f5fa8, #3b7dc9); }
-.bg-g1 { background: linear-gradient(135deg, #28a745, #4cd16a); }
-.bg-g2 { background: linear-gradient(135deg, #fd7e14, #ff9e43); }
-.bg-g3 { background: linear-gradient(135deg, #902f99, #902f99); }
+.bg-overall { background: linear-gradient(135deg, #A0D4F0, #A0D4F0); }
+.bg-g1 { background: linear-gradient(135deg, #0A2D55, #0A2D55); }
+.bg-g2 { background: linear-gradient(135deg, #F8E38A, #F8E38A); }
+.bg-g3 { background: linear-gradient(135deg, #B8C0C8, #B8C0C8); }
 
 /* Summary Tables CSS */
 .summary-tables-section {
