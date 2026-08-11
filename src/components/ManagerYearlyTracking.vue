@@ -392,7 +392,7 @@
                   <tr v-for="item in yearlySummaryData" :key="item.year">
                     <td><strong>{{ item.year }}</strong></td>
                     <td style="text-align: right;">{{ formatMillions(item.actual) }}</td>
-                    <td style="text-align: right; color: #d93025;">{{ formatMillions(item.target) }}</td>
+                    <td style="text-align: right; color: #28a745;">{{ formatMillions(item.target) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -405,6 +405,7 @@
           
           <!-- SITE FILTER BUTTON SIDEBAR -->
           <div class="site-filter-sidebar">
+            <span class="sidebar-title">Filter by Sites:</span> <!-- <--- ADD THIS LINE -->
             <button
               class="site-btn"
               :class="{ active: siteTrendConfig.selectedSite === 'ALL' }"
@@ -1088,7 +1089,7 @@ export default {
       // Base Annualized Arrays
       const actual = this.trackingYears.map(year => {
         const total = rows.reduce((sum, row) => sum + (Number(row[`year${year}`]) || 0), 0);
-        return Number((total / 1000000).toFixed(3));
+        return Number((total / 1000000).toFixed(1));
       });
 
       // Calculate Expected Values directly from DB targets
@@ -1100,20 +1101,20 @@ export default {
         }
 
         const totalExpected = yearTargets.reduce((sum, t) => sum + Number(t.expected_value), 0);
-        return Number((totalExpected / 1000000).toFixed(3));
+        return Number((totalExpected / 1000000).toFixed(1));
       });
 
       // Cumulative Calculations
       let cumActualSum = 0;
       const cumulativeActual = actual.map(val => {
         cumActualSum += val;
-        return Number(cumActualSum.toFixed(3));
+        return Number(cumActualSum.toFixed(1));
       });
 
       let cumExpectedSum = 0;
       const cumulativeExpected = expected.map(val => {
         cumExpectedSum += val;
-        return Number(cumExpectedSum.toFixed(3));
+        return Number(cumExpectedSum.toFixed(1));
       });
 
       return {
@@ -1251,20 +1252,28 @@ export default {
 
     yearlySummaryData() {
       // Requirement: Years N to N+2
-      const years = [this.currentYear, this.currentYear + 1, this.currentYear + 2];
+      const displayYears = [this.currentYear, this.currentYear + 1, this.currentYear + 2];
       
-      return years.map(year => {
-        // Actual Value for the year across all rows
-        const actual = this.rows.reduce((sum, row) => sum + (Number(row[`year${year}`]) || 0), 0);
-        
-        // Expected target for the year across all sites
-        const yearTargets = this.siteTargets.filter(t => t.target_year === year);
-        const target = yearTargets.reduce((sum, t) => sum + Number(t.expected_value), 0);
+      return displayYears.map(displayYear => {
+        let cumulativeActual = 0;
+        let cumulativeTarget = 0;
+
+        // Loop through the visible timeline up to the current display year to build the running total
+        this.trackingYears.forEach(year => {
+          if (year <= displayYear) {
+            // Add Actuals for this year
+            cumulativeActual += this.rows.reduce((sum, row) => sum + (Number(row[`year${year}`]) || 0), 0);
+            
+            // Add Targets for this year across all sites
+            const yearTargets = this.siteTargets.filter(t => t.target_year === year);
+            cumulativeTarget += yearTargets.reduce((sum, t) => sum + Number(t.expected_value), 0);
+          }
+        });
 
         return {
-          year: year,
-          actual: actual,
-          target: target
+          year: displayYear,
+          actual: cumulativeActual,
+          target: cumulativeTarget
         };
       });
     },
@@ -1279,7 +1288,12 @@ export default {
       return this.buildCountPieData('foakNoak');
     },
     pillarPieData() {
-      return this.buildCountPieData('pillars');
+      // Pull directly from your summary table data which already calculates the total values
+      const summary = this.pillarSummaryData;
+      return {
+        labels: summary.map(item => item.pillar),
+        values: summary.map(item => item.value)
+      };
     },
     kpiPieData() {
       return this.buildKpiPieData();
@@ -1444,7 +1458,7 @@ export default {
     },
 
     buildPieOptions(title, labels) {
-      const isFinancial = title === 'KPI Breakdown';
+      const isFinancial = title === 'KPI Breakdown' || title === 'Pillars';
 
       return {
         chart: {
@@ -2337,10 +2351,16 @@ export default {
   font-weight: 500;
   opacity: 0.95;
 }
-.bg-overall { background: linear-gradient(135deg, #A0D4F0, #A0D4F0); }
-.bg-g1 { background: linear-gradient(135deg, #0A2D55, #0A2D55); }
-.bg-g2 { background: linear-gradient(135deg, #F8E38A, #F8E38A); }
-.bg-g3 { background: linear-gradient(135deg, #B8C0C8, #B8C0C8); }
+
+.bg-overall { background: linear-gradient(135deg, #1E3A8A, #2563EB); }
+/* G1: Dark Navy */
+.bg-g1 { background: linear-gradient(135deg, #0A2D55, #124076); } 
+
+/* G2: Deep Teal / Cyan */
+.bg-g2 { background: linear-gradient(135deg, #4A235A, #6C3483); } 
+
+/* G3: Dark Steel Blue */
+.bg-g3 { background: linear-gradient(135deg, #312E81, #4F46E5); }
 
 /* Summary Tables CSS */
 .summary-tables-section {
@@ -2377,6 +2397,14 @@ export default {
   gap: 16px;
   margin-top: 4px;
 }
+.sidebar-title {
+  font-weight: 700;
+  color: #07254a;
+  font-size: 0.95rem;
+  margin-bottom: 2px;
+  padding-left: 2px;
+}
+
 .site-filter-sidebar {
   display: flex;
   flex-direction: column;
