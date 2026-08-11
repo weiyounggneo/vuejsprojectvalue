@@ -31,7 +31,7 @@
       <div class="topbar-actions">
         <button class="back-btn" @click="goBack" :disabled="isProcessing || isPageLoading">Back</button>
         <button class="home-btn" @click="goHome" :disabled="isProcessing || isPageLoading">Home</button>
-        <button class="spotfire-btn" @click="openSpotfire" :disabled="isProcessing || isPageLoading">Spotfire</button>
+        <button class="export-pdf-btn" @click="exportToPDF" :disabled="isProcessing || isPageLoading">Export PDF</button>
         <button class="logout-btn" @click="logout" :disabled="isProcessing || isPageLoading">Logout</button>
       </div>
     </header>
@@ -50,7 +50,7 @@
         :class="{ active: activeTab === 'analytics' }"
         @click="activeTab = 'analytics'"
       >
-        Analytics
+        Portfolio Overview
       </button>
     </div>
 
@@ -304,14 +304,33 @@
     </div>
 
     <!-- ========================================== -->
-    <!-- TAB 2: ANALYTICS                           -->
+    <!-- TAB 2: PORTFOLIO OVERVIEW                  -->
     <!-- ========================================== -->
     <div v-if="activeTab === 'analytics'" class="analytics-section">
       <div v-if="rows.length > 0" class="analytics-layout">
         
-        <!-- HEADER (UNFILTERED) -->
-        <div style="margin-bottom: 4px;">
+        <!-- HEADER & GLOBAL FILTER -->
+        <div class="analytics-shared-header">
           <h2 class="section-title">Executive Performance Overview</h2>
+          <div class="global-filter-bar">
+            <span class="sidebar-title">Dashboard Site Filter:</span>
+            <button
+              class="site-btn"
+              :class="{ active: dashboardFilter.selectedSite === 'ALL' }"
+              @click="dashboardFilter.selectedSite = 'ALL'"
+            >
+              All Sites
+            </button>
+            <button
+              v-for="site in analyticsSiteOptions"
+              :key="site"
+              class="site-btn"
+              :class="{ active: dashboardFilter.selectedSite === site }"
+              @click="dashboardFilter.selectedSite = site"
+            >
+              {{ site }}
+            </button>
+          </div>
         </div>
 
         <!-- EXECUTIVE CARDS SECTION -->
@@ -403,29 +422,10 @@
         <!-- TREND CHARTS WRAPPER WITH SIDEBAR -->
         <div class="trends-wrapper">
           
-          <!-- SITE FILTER BUTTON SIDEBAR -->
-          <div class="site-filter-sidebar">
-            <span class="sidebar-title">Filter by Sites:</span> <!-- <--- ADD THIS LINE -->
-            <button
-              class="site-btn"
-              :class="{ active: siteTrendConfig.selectedSite === 'ALL' }"
-              @click="siteTrendConfig.selectedSite = 'ALL'"
-            >
-              All Sites
-            </button>
-            <button
-              v-for="site in analyticsSiteOptions"
-              :key="site"
-              class="site-btn"
-              :class="{ active: siteTrendConfig.selectedSite === site }"
-              @click="siteTrendConfig.selectedSite = site"
-            >
-              {{ site }}
-            </button>
-          </div>
-
+          <!-- SITE FILTER BUTTON SIDEBAR (Left out since it's now global at top, but kept for layout structure if desired. Removed to streamline globally filtered view) -->
+          
           <!-- TREND CHARTS GRID (Side-by-Side) -->
-          <div class="trend-charts-section">
+          <div class="trend-charts-section" style="width: 100%;">
             <!-- CHART 1: Cumulative Values -->
             <div class="chart-card">
               <div class="chart-header">
@@ -876,6 +876,7 @@
 import { VueGoodTable } from 'vue-good-table-next';
 import VueApexCharts from 'vue3-apexcharts';
 import 'vue-good-table-next/dist/vue-good-table-next.css';
+import html2pdf from 'html2pdf.js';
 
 export default {
   name: 'ManagerYearlyTracking',
@@ -905,8 +906,8 @@ export default {
         endYear: currentYear + 3
       },
 
-      // Analytics site chart filter (Applies specifically to Line Charts)
-      siteTrendConfig: {
+      // Analytics global chart filter
+      dashboardFilter: {
         selectedSite: 'ALL'
       },
 
@@ -1031,7 +1032,17 @@ export default {
     },
 
     // ==========================================
-    // EXECUTIVE CARDS DATA (Unfiltered by Site)
+    // GLOBAL DASHBOARD FILTER LOGIC
+    // ==========================================
+    filteredDashboardRows() {
+      if (this.dashboardFilter.selectedSite === 'ALL') {
+        return this.rows;
+      }
+      return this.rows.filter(r => r.sites === this.dashboardFilter.selectedSite);
+    },
+
+    // ==========================================
+    // EXECUTIVE CARDS DATA (Filtered)
     // ==========================================
     executiveCardsData() {
       const result = {
@@ -1041,7 +1052,7 @@ export default {
         G3: { count: 0, value: 0 }
       };
 
-      this.rows.forEach(row => {
+      this.filteredDashboardRows.forEach(row => {
         // Calculate the project's value over the selected tracking timeline
         let projectValue = 0;
         this.trackingYears.forEach(year => {
@@ -1070,21 +1081,15 @@ export default {
     },
 
     // ==========================================
-    // TREND CHARTS LOGIC (Filtered by Site Button)
+    // TREND CHARTS LOGIC (Filtered)
     // ==========================================
     analyticsSiteOptions() {
       // Dynamic lists for buttons but ensuring we remove any bad DB entries that equal "ALL"
       return [...new Set(this.rows.map(r => r.sites).filter(site => site && site.toUpperCase() !== 'ALL'))].sort();
     },
-    filteredSiteTrendRows() {
-      if (this.siteTrendConfig.selectedSite === 'ALL') {
-        return this.rows;
-      }
-      return this.rows.filter(r => r.sites === this.siteTrendConfig.selectedSite);
-    },
     siteTrendData() {
       const labels = this.trackingYears.map(String);
-      const rows = this.filteredSiteTrendRows;
+      const rows = this.filteredDashboardRows;
 
       // Base Annualized Arrays
       const actual = this.trackingYears.map(year => {
@@ -1096,8 +1101,8 @@ export default {
       const expected = this.trackingYears.map(year => {
         let yearTargets = this.siteTargets.filter(t => t.target_year === year);
         
-        if (this.siteTrendConfig.selectedSite !== 'ALL') {
-          yearTargets = yearTargets.filter(t => t.site === this.siteTrendConfig.selectedSite);
+        if (this.dashboardFilter.selectedSite !== 'ALL') {
+          yearTargets = yearTargets.filter(t => t.site === this.dashboardFilter.selectedSite);
         }
 
         const totalExpected = yearTargets.reduce((sum, t) => sum + Number(t.expected_value), 0);
@@ -1134,7 +1139,7 @@ export default {
           toolbar: { show: false },
           animations: { enabled: false }
         },
-        colors: ['#05204a', '#037d50'], // Blue for Actual, Red for Expected
+        colors: ['#05204a', '#037d50'], // Blue for Actual, Green for Expected
         xaxis: {
           categories: this.siteTrendData.labels,
           title: { text: 'Year' },
@@ -1182,7 +1187,7 @@ export default {
           toolbar: { show: false },
           animations: { enabled: false }
         },
-        colors: ['#05204a', '#037d50'], // Teal for Actual, Red for Expected
+        colors: ['#05204a', '#037d50'], // Teal for Actual, Green for Expected
         xaxis: {
           categories: this.siteTrendData.labels,
           title: { text: 'Year' },
@@ -1223,12 +1228,12 @@ export default {
     },
 
     // ==========================================
-    // SUMMARY TABLES DATA (Unfiltered by Site)
+    // SUMMARY TABLES DATA (Filtered)
     // ==========================================
     pillarSummaryData() {
       const map = {};
 
-      this.rows.forEach(row => {
+      this.filteredDashboardRows.forEach(row => {
         const pillar = row.pillars || 'Unassigned';
         if (!map[pillar]) {
           map[pillar] = { count: 0, value: 0 };
@@ -1261,11 +1266,14 @@ export default {
         // Loop through the visible timeline up to the current display year to build the running total
         this.trackingYears.forEach(year => {
           if (year <= displayYear) {
-            // Add Actuals for this year
-            cumulativeActual += this.rows.reduce((sum, row) => sum + (Number(row[`year${year}`]) || 0), 0);
+            // Add Actuals for this year based on FILTERED rows
+            cumulativeActual += this.filteredDashboardRows.reduce((sum, row) => sum + (Number(row[`year${year}`]) || 0), 0);
             
-            // Add Targets for this year across all sites
-            const yearTargets = this.siteTargets.filter(t => t.target_year === year);
+            // Add Targets for this year based on FILTERED site
+            let yearTargets = this.siteTargets.filter(t => t.target_year === year);
+            if (this.dashboardFilter.selectedSite !== 'ALL') {
+              yearTargets = yearTargets.filter(t => t.site === this.dashboardFilter.selectedSite);
+            }
             cumulativeTarget += yearTargets.reduce((sum, t) => sum + Number(t.expected_value), 0);
           }
         });
@@ -1279,7 +1287,7 @@ export default {
     },
 
     // ==========================================
-    // STATIC PIE CHARTS
+    // STATIC PIE CHARTS (Filtered)
     // ==========================================
     dtitPieData() {
       return this.buildCountPieData('dtitInvolved');
@@ -1288,7 +1296,7 @@ export default {
       return this.buildCountPieData('foakNoak');
     },
     pillarPieData() {
-      // Pull directly from your summary table data which already calculates the total values
+      // Pull directly from your summary table data which already calculates the total values and applies filtering
       const summary = this.pillarSummaryData;
       return {
         labels: summary.map(item => item.pillar),
@@ -1345,6 +1353,55 @@ export default {
     await this.fetchTable();
   },
   methods: {
+    // -------------------------------------------------
+    // PDF EXPORT
+    // -------------------------------------------------
+    async exportToPDF() {
+      if (this.activeTab !== 'analytics') {
+        alert('Please switch to the Portfolio Overview tab to export the dashboard.');
+        return;
+      }
+
+      this.isProcessing = true;
+      this.processingMessage = 'Generating single-page PDF... This may take a few seconds.';
+
+      try {
+        const element = document.querySelector('.analytics-section');
+        
+        // Grab the exact real-time dimensions of your dashboard
+        const dashboardWidth = element.scrollWidth;
+        const dashboardHeight = element.scrollHeight;
+        
+        const opt = {
+          margin:       0, // No margins needed since the page matches the content exactly
+          filename:     'Portfolio_Overview_Dashboard.pdf',
+          image:        { type: 'jpeg', quality: 1 },
+          html2canvas:  { 
+            scale: 2, 
+            useCORS: true, 
+            backgroundColor: '#f4f6f9',
+            // Force the canvas to match the exact size
+            windowWidth: dashboardWidth,
+            width: dashboardWidth,
+            height: dashboardHeight
+          },
+          jsPDF: { 
+            unit: 'px', 
+            // Create a custom PDF page exactly the size of the dashboard
+            format: [dashboardWidth, dashboardHeight], 
+            orientation: dashboardWidth > dashboardHeight ? 'landscape' : 'portrait' 
+          } 
+        };
+
+        await html2pdf().set(opt).from(element).save();
+      } catch (err) {
+        alert('Error generating PDF: ' + err.message);
+      } finally {
+        this.isProcessing = false;
+        this.processingMessage = '';
+      }
+    },
+
     // -------------------------------------------------
     // TIMELINE WINDOW UTILITIES
     // -------------------------------------------------
@@ -1426,7 +1483,7 @@ export default {
     buildCountPieData(field) {
       const map = {};
 
-      this.rows.forEach(row => {
+      this.filteredDashboardRows.forEach(row => {
         const key = this.normalizePieLabel(row[field]);
         map[key] = (map[key] || 0) + 1;
       });
@@ -1452,7 +1509,7 @@ export default {
       return {
         labels: metrics.map(m => m.label),
         values: metrics.map(m => {
-          return this.rows.reduce((sum, row) => sum + (Number(row[m.field]) || 0), 0);
+          return this.filteredDashboardRows.reduce((sum, row) => sum + (Number(row[m.field]) || 0), 0);
         })
       };
     },
@@ -1609,12 +1666,6 @@ export default {
     },
     goBack() {
       this.$router.push('/landing');
-    },
-    openSpotfire() {
-      window.open(
-        'https://spotfirecbeit.mua.st.com/spotfire/wp/OpenAnalysis?file=ac4fc7dd-24b0-4f94-922d-1184fedfca41',
-        '_blank'
-      );
     },
     logout() {
       localStorage.removeItem('token');
@@ -2142,7 +2193,7 @@ export default {
 .home-btn,
 .logout-btn,
 .back-btn,
-.spotfire-btn {
+.export-pdf-btn {
   background: none;
   color: #fff;
   border: 2px solid #fff;
@@ -2156,7 +2207,7 @@ export default {
 .home-btn:hover,
 .logout-btn:hover,
 .back-btn:hover,
-.spotfire-btn:hover {
+.export-pdf-btn:hover {
   background: #ffd600;
   color: #07254a;
   border-color: #ffd600;
@@ -2300,10 +2351,30 @@ export default {
   flex-direction: column;
   gap: 12px; /* Compressed layout gap */
 }
+.analytics-shared-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: white;
+  padding: 16px 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e0e6ed;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
 .section-title {
   margin: 0;
   color: #07254a;
   font-size: 1.15rem;
+}
+
+.global-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 /* Executive Cards CSS */
@@ -2391,35 +2462,21 @@ export default {
   background-color: #f0f4f8;
 }
 
-/* Trend Charts Wrapper & Sidebar CSS */
-.trends-wrapper {
-  display: flex;
-  gap: 16px;
-  margin-top: 4px;
-}
 .sidebar-title {
   font-weight: 700;
   color: #07254a;
   font-size: 0.95rem;
-  margin-bottom: 2px;
-  padding-left: 2px;
 }
 
-.site-filter-sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 120px;
-}
 .site-btn {
-  padding: 12px 16px;
+  padding: 8px 16px;
   background-color: white;
   border: 1px solid #e0e6ed;
   border-radius: 8px;
   cursor: pointer;
   font-weight: 600;
   color: #6c757d;
-  text-align: left;
+  text-align: center;
   font-size: 0.9rem;
   transition: all 0.2s ease;
   box-shadow: 0 2px 4px rgba(0,0,0,0.02);
@@ -2437,7 +2494,6 @@ export default {
 }
 
 .trend-charts-section {
-  flex: 1;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 16px;
@@ -2455,6 +2511,8 @@ export default {
   padding: 12px 16px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   border: 1px solid #e0e6ed;
+  width: 100%;             /* <--- Ensure card doesn't exceed grid box */
+  box-sizing: border-box;  /* <--- Include padding in width math */
 }
 .chart-header {
   border-bottom: 2px solid #eee;
@@ -2887,17 +2945,6 @@ export default {
 @media (max-width: 1100px) {
   .executive-cards-section {
     grid-template-columns: repeat(2, 1fr);
-  }
-  .trends-wrapper {
-    flex-direction: column;
-  }
-  .site-filter-sidebar {
-    flex-direction: row;
-    overflow-x: auto;
-    padding-bottom: 8px;
-  }
-  .site-btn {
-    white-space: nowrap;
   }
   .trend-charts-section {
     grid-template-columns: 1fr;
