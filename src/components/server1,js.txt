@@ -1616,9 +1616,22 @@ app.get('/api/manager-yearly', authenticateToken, async (req, res) => {
       ) latest ON c.project_id = latest.project_id AND c.created_at = latest.max_date
     `, [], req);
 
+    // --- NEW: Fetch Actual Dates from the Phases Ledger ---
+    const phases = await bemQueryPromise(`
+      SELECT project_id, phase_name, DATE_FORMAT(MIN(start_date), '%Y-%m-%d') as actual_start 
+      FROM ${MANAGER_PHASES_TABLE} 
+      WHERE phase_name IN ('G1', 'G2', 'G3') 
+      GROUP BY project_id, phase_name
+    `, [], req);
+
     const result = projects.map(proj => {
       const projMetrics = metrics.find(m => m.project_id === proj.project_id) || {};
       const projComment = comments.find(c => c.project_id === proj.project_id) || {};
+
+      // Match actual start dates from ledger
+      const g1 = phases.find(p => p.project_id === proj.project_id && p.phase_name === 'G1');
+      const g2 = phases.find(p => p.project_id === proj.project_id && p.phase_name === 'G2');
+      const g3 = phases.find(p => p.project_id === proj.project_id && p.phase_name === 'G3');
 
       const payload = {
         projectId: proj.project_id,
@@ -1631,11 +1644,16 @@ app.get('/api/manager-yearly', authenticateToken, async (req, res) => {
         aiAaAType: proj.ai_type,
         foakNoak: proj.foak_noak,
         
-        // --- NEW: Added Target Timeline Dates ---
+        // Target Timeline Dates
         targetG1Date: proj.target_g1_date || null,
         targetG2Date: proj.target_g2_date || null,
         targetG3Date: proj.target_g3_date || null,
         targetClosedDate: proj.target_closed_date || null,
+
+        // --- NEW: Actual Timeline Dates (Sourced directly from historical ledger) ---
+        actualG1Date: g1 ? g1.actual_start : null,
+        actualG2Date: g2 ? g2.actual_start : null,
+        actualG3Date: g3 ? g3.actual_start : null,
 
         // Mapped from t_manager_comments
         comment: projComment.comment_text || null,
@@ -1670,22 +1688,42 @@ app.get('/api/manager-yearly', authenticateToken, async (req, res) => {
   }
 });
 
-// Manager Phases (Ledger) Route for Gantt Chart
-app.get('/api/manager-phases', authenticateToken, async (req, res) => {
-  const trace = traceStart('GET /api/manager-phases', req);
+// --- NEW ROUTE: Pipeline Velocity (Monthly Throughput) ---
+app.get('/api/manager-yearly/pipeline-velocity', authenticateToken, async (req, res) => {
+  const trace = traceStart('GET /api/manager-yearly/pipeline-velocity', req);
   try {
-    const rows = await bemQueryPromise(
-      `SELECT * FROM ${MANAGER_PHASES_TABLE} ORDER BY start_date ASC`, 
-      [], req
-    );
-    traceEnd(trace, { outcome: 'success', rowCount: rows.length });
-    return res.json(rows);
+    // Automatically groups ledger records by month/year and counts G1/G2/G3 entrances
+    const rows = await bemQueryPromise(`
+      SELECT 
+        DATE_FORMAT(start_date, '%Y-%m') AS month_key,
+        DATE_FORMAT(start_date, '%b %Y') AS month_label,
+        SUM(CASE WHEN phase_name = 'G1' THEN 1 ELSE 0 END) AS g1_count,
+        SUM(CASE WHEN phase_name = 'G2' THEN 1 ELSE 0 END) AS g2_count,
+        SUM(CASE WHEN phase_name = 'G3' THEN 1 ELSE 0 END) AS g3_count,
+        COUNT(*) AS total_transitions
+      FROM ${MANAGER_PHASES_TABLE}
+      WHERE phase_name IN ('G1', 'G2', 'G3')
+      GROUP BY month_key, month_label
+      ORDER BY month_key DESC
+      LIMIT 12
+    `, [], req);
+
+    // Clean up the formatting so Vue can directly inject it into the table
+    const formattedData = rows.map(r => ({
+      month: r.month_label,
+      g1: Number(r.g1_count),
+      g2: Number(r.g2_count),
+      g3: Number(r.g3_count),
+      total: Number(r.total_transitions)
+    }));
+
+    traceEnd(trace, { outcome: 'success', rowCount: formattedData.length });
+    return res.json(formattedData);
   } catch (err) {
     traceError(trace, err);
     return res.status(500).json({ message: err.message });
   }
 });
-
 
 // Manager Site Targets Route
 app.get('/api/manager-site-targets', authenticateToken, async (req, res) => {
