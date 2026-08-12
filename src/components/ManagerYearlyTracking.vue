@@ -574,7 +574,7 @@
           </div>
         </div>
 
-        <!-- GANTT CHART SECTION -->
+        <!-- 1. GANTT CHART SECTION (Top) -->
         <div class="chart-card">
           <div class="chart-header">
             <h3 class="chart-title">Proposed Phase Timelines</h3>
@@ -589,70 +589,81 @@
           </div>
         </div>
 
-        <div class="summary-tables-section" style="margin-top: 4px;">
-          <!-- MILESTONE TRACKING TABLE -->
-          <div class="chart-card">
-            <div class="chart-header">
-              <h3 class="chart-title">Milestone Tracking</h3>
-            </div>
-            <div class="table-responsive" style="max-height: 350px; overflow-y: auto;">
-              <table class="summary-table">
-                <thead style="position: sticky; top: 0; z-index: 10;">
-                  <tr>
-                    <th>Project Name</th>
-                    <th>Current Status</th>
-                    <th>Target G1</th>
-                    <th>Actual G1</th>
-                    <th>Target G2</th>
-                    <th>Actual G2</th>
-                    <th>Target G3</th>
-                    <th>Actual G3</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="item in filteredTimelineRows" :key="item.projectId">
-                    <td><strong>{{ item.projectName }}</strong></td>
-                    <td><span class="badge">{{ item.projectStatus || '-' }}</span></td>
-                    <td>{{ formatDate(item.targetG1Date) }}</td>
-                    <td class="pending-cell">Pending</td>
-                    <td>{{ formatDate(item.targetG2Date) }}</td>
-                    <td class="pending-cell">Pending</td>
-                    <td>{{ formatDate(item.targetG3Date) }}</td>
-                    <td class="pending-cell">Pending</td>
-                  </tr>
-                  <tr v-if="filteredTimelineRows.length === 0">
-                    <td colspan="8" style="text-align: center; color: #666;">No projects found for the selected filters.</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+        <!-- 2. MILESTONE TRACKING TABLE (Middle) -->
+        <div class="chart-card">
+          <div class="chart-header">
+            <h3 class="chart-title">Milestone Tracking</h3>
           </div>
+          <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+            <table class="summary-table">
+              <thead style="position: sticky; top: 0; z-index: 10;">
+                <tr>
+                  <th>Project Name</th>
+                  <th>Current Status</th>
+                  <th>Target G1</th>
+                  <th>Actual G1</th>
+                  <th>Target G2</th>
+                  <th>Actual G2</th>
+                  <th>Target G3</th>
+                  <th>Actual G3</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in filteredTimelineRows" :key="item.projectId">
+                  <td><strong>{{ item.projectName }}</strong></td>
+                  <td><span class="badge">{{ item.projectStatus || '-' }}</span></td>
+                  <td>{{ formatDate(item.targetG1Date) }}</td>
+                  <td :class="getRagClass(item.actualG1Date, item.targetG1Date)">
+                    <strong>{{ item.actualG1Date ? formatDate(item.actualG1Date) : 'Pending' }}</strong>
+                  </td>
+                  <td>{{ formatDate(item.targetG2Date) }}</td>
+                  <td :class="getRagClass(item.actualG2Date, item.targetG2Date)">
+                    <strong>{{ item.actualG2Date ? formatDate(item.actualG2Date) : 'Pending' }}</strong>
+                  </td>
+                  <td>{{ formatDate(item.targetG3Date) }}</td>
+                  <td :class="getRagClass(item.actualG3Date, item.targetG3Date)">
+                    <strong>{{ item.actualG3Date ? formatDate(item.actualG3Date) : 'Pending' }}</strong>
+                  </td>
+                </tr>
+                <tr v-if="filteredTimelineRows.length === 0">
+                  <td colspan="8" style="text-align: center; color: #666;">No projects found for the selected filters.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-          <!-- PIPELINE VELOCITY TABLE (Placeholder for Ledger Hookup) -->
-          <div class="chart-card">
-            <div class="chart-header">
-              <h3 class="chart-title">Pipeline Velocity (Monthly Throughput)</h3>
-            </div>
-            <div class="table-responsive" style="max-height: 350px; overflow-y: auto;">
-              <table class="summary-table">
-                <thead style="position: sticky; top: 0; z-index: 10;">
-                  <tr>
-                    <th>Month</th>
-                    <th style="text-align: center;">Entered G1</th>
-                    <th style="text-align: center;">Entered G2</th>
-                    <th style="text-align: center;">Entered G3</th>
-                    <th style="text-align: center;">Total Transitions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td colspan="5" style="text-align: center; color: #666; padding: 30px;">
-                      <em>Backend ledger integration pending to calculate historical monthly velocity.</em>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+        <!-- 3. PIPELINE VELOCITY TABLE (Bottom) -->
+        <div class="chart-card">
+          <div class="chart-header">
+            <h3 class="chart-title">Pipeline Velocity (Monthly Throughput)</h3>
+          </div>
+          <div class="table-responsive" style="max-height: 350px; overflow-y: auto;">
+            <table class="summary-table">
+              <thead style="position: sticky; top: 0; z-index: 10;">
+                <tr>
+                  <th>Month</th>
+                  <th style="text-align: center;">Entered G1</th>
+                  <th style="text-align: center;">Entered G2</th>
+                  <th style="text-align: center;">Entered G3</th>
+                  <th style="text-align: center;">Total Transitions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, index) in velocityData" :key="index">
+                  <td><strong>{{ row.month }}</strong></td>
+                  <td style="text-align: center; color: #124076; font-weight: 600;">{{ row.g1 }}</td>
+                  <td style="text-align: center; color: #117A65; font-weight: 600;">{{ row.g2 }}</td>
+                  <td style="text-align: center; color: #6C3483; font-weight: 600;">{{ row.g3 }}</td>
+                  <td style="text-align: center; font-weight: bold; background-color: #f8f9fb;">{{ row.total }}</td>
+                </tr>
+                <tr v-if="velocityData.length === 0">
+                  <td colspan="5" style="text-align: center; color: #666; padding: 30px;">
+                    <em>No historical transitions found.</em>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
@@ -1106,6 +1117,7 @@ export default {
       // Data State
       rows: [],
       siteTargets: [], // Holds the exact expected targets from DB
+      velocityData: [], // Pipeline throughput data directly from backend
       selectedRow: null,
 
       // Columns / Table refresh control
@@ -1501,22 +1513,39 @@ export default {
         }
 
         return matchSite && matchPillar && matchStatus;
-      });
+      }); 
     },
 
     ganttChartHeight() {
-    
       const projectCount = this.filteredTimelineRows.length;
-      const baseHeight = 180;
-      const dynamicHeight = baseHeight + (projectCount * 32);
-      return projectCount === 0 ? 300 : Math.min(dynamicHeight, 600);
+      const baseHeight = 100; // Reduced base padding
+      const dynamicHeight = baseHeight + (projectCount * 28); // Slightly thinner bars
       
+      // Caps the chart at 350px so it always stays compact
+      return projectCount === 0 ? 150 : Math.min(dynamicHeight, 450); 
     },
 
     ganttChartSeries() {
-      const g1Data = [];
-      const g2Data = [];
-      const g3Data = [];
+      const g1Solid = []; const g2Solid = []; const g3Solid = [];
+      const g1Past = [];  const g2Past = [];  const g3Past = [];
+      const now = new Date().getTime(); // Grabs today's exact date
+
+      // Helper function to dynamically split the bars if they cross "Today"
+      const processPhase = (projName, start, end, solidArr, pastArr) => {
+        if (!start || !end || start >= end) return;
+        
+        if (end <= now) {
+          // Entirely in the past -> Make it striped
+          pastArr.push({ x: projName, y: [start, end] });
+        } else if (start >= now) {
+          // Entirely in the future -> Keep it solid
+          solidArr.push({ x: projName, y: [start, end] });
+        } else {
+          // Crosses today -> Split the bar exactly at the red line!
+          pastArr.push({ x: projName, y: [start, now] });
+          solidArr.push({ x: projName, y: [now, end] });
+        }
+      };
 
       this.filteredTimelineRows.forEach(row => {
         const tG1 = row.targetG1Date ? new Date(row.targetG1Date).getTime() : null;
@@ -1524,22 +1553,19 @@ export default {
         const tG3 = row.targetG3Date ? new Date(row.targetG3Date).getTime() : null;
         const tClosed = row.targetClosedDate ? new Date(row.targetClosedDate).getTime() : null;
 
-        // Plot bars sequentially if valid dates exist
-        if (tG1 && tG2 && tG2 >= tG1) {
-          g1Data.push({ x: row.projectName, y: [tG1, tG2] });
-        }
-        if (tG2 && tG3 && tG3 >= tG2) {
-          g2Data.push({ x: row.projectName, y: [tG2, tG3] });
-        }
-        if (tG3 && tClosed && tClosed >= tG3) {
-          g3Data.push({ x: row.projectName, y: [tG3, tClosed] });
-        }
+        processPhase(row.projectName, tG1, tG2, g1Solid, g1Past);
+        processPhase(row.projectName, tG2, tG3, g2Solid, g2Past);
+        processPhase(row.projectName, tG3, tClosed, g3Solid, g3Past);
       });
 
+      // Output exactly 6 series (3 for Future, 3 for Past)
       return [
-        { name: 'Proposed G1 Phase', data: g1Data },
-        { name: 'Proposed G2 Phase', data: g2Data },
-        { name: 'Proposed G3 Phase', data: g3Data }
+        { name: 'G1 (Active/Future)', data: g1Solid },
+        { name: 'G2 (Active/Future)', data: g2Solid },
+        { name: 'G3 (Active/Future)', data: g3Solid },
+        { name: 'G1 (Past)', data: g1Past },
+        { name: 'G2 (Past)', data: g2Past },
+        { name: 'G3 (Past)', data: g3Past }
       ];
     },
 
@@ -1551,17 +1577,49 @@ export default {
           toolbar: { show: true },
           animations: { enabled: false }
         },
+        annotations: {
+        xaxis: [
+          {
+            x: new Date().getTime(),
+            strokeDashArray: 4,
+            borderColor: '#000000',
+            label: {
+              borderColor: '#000000',
+              position: 'bottom',
+              textAnchor: 'middle',
+              orientation: 'horizontal', // <-- This centers the flag exactly on the line
+              offsetX: 0,           // <-- Ensures no weird default shifting
+              offsetY: -6,          
+              style: { color: '#fff', background: '#000000', fontWeight: 600, fontSize: '11px' },
+              text: 'Today'
+            }
+          }
+        ]
+      },
         plotOptions: {
           bar: {
             horizontal: true,
             barHeight: '60%',
-            rangeBarGroupRows: true // Places overlapping/sequential series natively on the same project row
+            rangeBarGroupRows: true 
           }
         },
-        colors: ['#124076', '#117A65', '#6C3483'], // Navy, Teal, Amethyst mapping
+        // 3 bold colors for Future/Active, 3 soft/pastel colors for the Past
+        colors: [
+          '#124076', '#6C3483', '#4F46E5', // Navy, Amethyst, Indigo (Future)
+          '#a3b8d7', '#c9a1d6', '#a9a4f8'  // Soft Navy, Soft Amethyst, Soft Indigo (Past)
+        ],
+        fill: {
+          type: 'solid',
+          opacity: 1
+        },
         xaxis: {
           type: 'datetime',
-          labels: { style: { fontSize: '12px' } }
+          position: 'bottom', // Moves the dates back to the bottom
+          labels: { 
+            format: 'MMM yyyy',
+            datetimeUTC: false,
+            style: { fontSize: '12px' } 
+          }
         },
         yaxis: {
           labels: { style: { fontSize: '13px', fontWeight: 600 } }
@@ -1924,16 +1982,19 @@ export default {
     async fetchTable() {
       this.isPageLoading = true;
       try {
-        const [projectsRes, targetsRes] = await Promise.all([
+        const [projectsRes, targetsRes, velocityRes] = await Promise.all([
           this.apiFetch(`${process.env.VUE_APP_API_URL}/api/manager-yearly`),
-          this.apiFetch(`${process.env.VUE_APP_API_URL}/api/manager-site-targets`)
+          this.apiFetch(`${process.env.VUE_APP_API_URL}/api/manager-site-targets`),
+          this.apiFetch(`${process.env.VUE_APP_API_URL}/api/manager-yearly/pipeline-velocity`)
         ]);
 
         if (!projectsRes.ok) throw new Error('Failed to fetch project data');
         if (!targetsRes.ok) throw new Error('Failed to fetch target data');
+        if (!velocityRes.ok) throw new Error('Failed to fetch velocity data');
 
         const data = await projectsRes.json();
         const targetsData = await targetsRes.json();
+        const velocityData = await velocityRes.json();
         
         // Ensure projectStatus maps correctly from backend project_status
         this.rows = data.map(row => ({
@@ -1943,6 +2004,8 @@ export default {
         
         // Save the raw targets lookup table into Vue state
         this.siteTargets = targetsData;
+        // Save the new real pipeline velocity data from the backend
+        this.velocityData = velocityData;
 
       } catch (err) {
         console.error(err);
@@ -2139,6 +2202,13 @@ export default {
     formatDate(val) {
       if (!val) return '-';
       return String(val).slice(0, 10);
+    },
+    getRagClass(actual, target) {
+      if (!actual || !target) return 'pending-cell';
+      const actualDate = new Date(actual);
+      const targetDate = new Date(target);
+      // If actual is greater than target, it's late (Red). Otherwise, on-time/early (Green).
+      return actualDate > targetDate ? 'rag-red' : 'rag-green';
     },
 
     // -------------------------------------------------
@@ -2754,14 +2824,21 @@ export default {
   border-color: #1f5fa8;
 }
 .gantt-scroll-container {
-  height: 600px;
+  max-height: 550px;
   overflow-y: auto;
   overflow-x: hidden;
+  padding-right: 8px;
 }
 .pending-cell {
   color: #999;
   font-size: 0.85em;
   font-style: italic;
+}
+.rag-red {
+  color: #d93025 !important;
+}
+.rag-green {
+  color: #037d50 !important;
 }
 
 /* Executive Cards CSS */
