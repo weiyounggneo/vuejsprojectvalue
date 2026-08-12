@@ -183,7 +183,7 @@
 
       <div class="table-section">
         <div class="inline-edit-hint">
-          💡 <strong>Tip:</strong> Double-click any cell below to input or update its value directly. Use the preset view buttons below to quickly show or hide metadata.
+          💡 <strong>Tip:</strong> Double-click any cell below to input or update its value directly. For multiple sites, separate them with commas (e.g., BSK, MUA). Use the preset view buttons below to quickly show or hide metadata.
         </div>
 
         <div class="horizontal-scroll-wrapper">
@@ -216,6 +216,17 @@
                     style="width: 100%; min-width: 150px;"
                   />
                   <input
+                    v-else-if="props.column.type === 'date'"
+                    type="date"
+                    v-model="editValue"
+                    @blur="saveInlineEdit(props.row)"
+                    @keyup.enter="saveInlineEdit(props.row)"
+                    @keyup.esc="cancelInlineEdit"
+                    v-focus
+                    class="inline-input"
+                    style="width: 100%; min-width: 140px;"
+                  />
+                  <input
                     v-else
                     type="number"
                     step="any"
@@ -241,6 +252,9 @@
                   </template>
                   <template v-else-if="props.column.formatType === 'percent'">
                     {{ formatPercent(props.row[props.column.field]) }}
+                  </template>
+                  <template v-else-if="props.column.type === 'date'">
+                    {{ formatDate(props.row[props.column.field]) }}
                   </template>
                   <template v-else>
                     {{ props.row[props.column.field] ?? '-' }}
@@ -274,6 +288,9 @@
         <div class="divider"></div>
         <button @click="setFinancialView" :disabled="isProcessing || isPageLoading" class="view-btn">
           Financial View
+        </button>
+        <button @click="setTimelineView" :disabled="isProcessing || isPageLoading" class="view-btn">
+          Timeline View
         </button>
         <button @click="setGlobalView" :disabled="isProcessing || isPageLoading" class="view-btn">
           Global View
@@ -422,8 +439,6 @@
         <!-- TREND CHARTS WRAPPER WITH SIDEBAR -->
         <div class="trends-wrapper">
           
-          <!-- SITE FILTER BUTTON SIDEBAR (Left out since it's now global at top, but kept for layout structure if desired. Removed to streamline globally filtered view) -->
-          
           <!-- TREND CHARTS GRID (Side-by-Side) -->
           <div class="trend-charts-section" style="width: 100%;">
             <!-- CHART 1: Cumulative Values -->
@@ -569,15 +584,17 @@
             </div>
 
             <div class="form-group">
-              <label for="sites">Sites</label>
-              <select id="sites" v-model="activeForm.sites" :disabled="isProcessing">
-                <option value="">(Blank)</option>
-                <option value="ALL">ALL</option>
-                <option value="BSK">BSK</option>
-                <option value="KIR">KIR</option>
-                <option value="MUA">MUA</option>
-                <option value="STS">STS</option>
-              </select>
+              <label>Sites (Select Multiple)</label>
+              <div class="checkbox-group">
+                <label><input type="checkbox" value="ALL" v-model="activeForm.sitesArray" :disabled="isProcessing"> ALL</label>
+                <label><input type="checkbox" value="BSK" v-model="activeForm.sitesArray" :disabled="isProcessing"> BSK</label>
+                <label><input type="checkbox" value="CAL" v-model="activeForm.sitesArray" :disabled="isProcessing"> CAL</label>
+                <label><input type="checkbox" value="CLB" v-model="activeForm.sitesArray" :disabled="isProcessing"> CLB</label>
+                <label><input type="checkbox" value="KIR" v-model="activeForm.sitesArray" :disabled="isProcessing"> KIR</label>
+                <label><input type="checkbox" value="MAL" v-model="activeForm.sitesArray" :disabled="isProcessing"> MAL</label>
+                <label><input type="checkbox" value="MUA" v-model="activeForm.sitesArray" :disabled="isProcessing"> MUA</label>
+                <label><input type="checkbox" value="STS" v-model="activeForm.sitesArray" :disabled="isProcessing"> STS</label>
+              </div>
             </div>
 
             <div class="form-group">
@@ -685,6 +702,27 @@
             <div class="form-group">
               <label for="qualityCases">Quality Cases</label>
               <input id="qualityCases" type="number" step="any" v-model="activeForm.qualityCases" :disabled="isProcessing" />
+            </div>
+          </div>
+
+          <!-- SECTION 4: PROPOSED TIMELINE TARGETS -->
+          <h4 class="section-heading">4. Proposed Timeline Targets</h4>
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="targetG1Date">Target G1 Date</label>
+              <input id="targetG1Date" type="date" v-model="activeForm.targetG1Date" :disabled="isProcessing" />
+            </div>
+            <div class="form-group">
+              <label for="targetG2Date">Target G2 Date</label>
+              <input id="targetG2Date" type="date" v-model="activeForm.targetG2Date" :disabled="isProcessing" />
+            </div>
+            <div class="form-group">
+              <label for="targetG3Date">Target G3 Date</label>
+              <input id="targetG3Date" type="date" v-model="activeForm.targetG3Date" :disabled="isProcessing" />
+            </div>
+            <div class="form-group">
+              <label for="targetClosedDate">Target Closed Date</label>
+              <input id="targetClosedDate" type="date" v-model="activeForm.targetClosedDate" :disabled="isProcessing" />
             </div>
           </div>
 
@@ -1020,13 +1058,27 @@ export default {
       return [...new Set(this.rows.map(r => r.pillars).filter(Boolean))].sort();
     },
     uniqueSites() {
-      return [...new Set(this.rows.map(r => r.sites).filter(Boolean))].sort();
+      const allSites = new Set();
+      this.rows.forEach(r => {
+        if (r.sites) {
+          String(r.sites).split(',').forEach(s => {
+            const clean = s.trim();
+            if (clean && clean.toUpperCase() !== 'ALL') allSites.add(clean);
+          });
+        }
+      });
+      return Array.from(allSites).sort();
     },
     filteredRows() {
       return this.rows.filter(row => {
         const matchName = !this.filters.projectName || row.projectName === this.filters.projectName;
         const matchPillar = !this.filters.pillar || row.pillars === this.filters.pillar;
-        const matchSite = !this.filters.site || row.sites === this.filters.site;
+        
+        let matchSite = true;
+        if (this.filters.site) {
+          matchSite = row.sites && (row.sites.includes(this.filters.site) || row.sites.includes('ALL'));
+        }
+
         return matchName && matchPillar && matchSite;
       });
     },
@@ -1038,7 +1090,9 @@ export default {
       if (this.dashboardFilter.selectedSite === 'ALL') {
         return this.rows;
       }
-      return this.rows.filter(r => r.sites === this.dashboardFilter.selectedSite);
+      return this.rows.filter(r => 
+        r.sites && (String(r.sites).includes(this.dashboardFilter.selectedSite) || String(r.sites).includes('ALL'))
+      );
     },
 
     // ==========================================
@@ -1084,8 +1138,16 @@ export default {
     // TREND CHARTS LOGIC (Filtered)
     // ==========================================
     analyticsSiteOptions() {
-      // Dynamic lists for buttons but ensuring we remove any bad DB entries that equal "ALL"
-      return [...new Set(this.rows.map(r => r.sites).filter(site => site && site.toUpperCase() !== 'ALL'))].sort();
+      const allSites = new Set();
+      this.rows.forEach(r => {
+        if (r.sites) {
+          r.sites.split(',').forEach(s => {
+            const clean = s.trim().toUpperCase();
+            if (clean && clean !== 'ALL') allSites.add(clean);
+          });
+        }
+      });
+      return Array.from(allSites).sort();
     },
     siteTrendData() {
       const labels = this.trackingYears.map(String);
@@ -1373,21 +1435,19 @@ export default {
         const dashboardHeight = element.scrollHeight;
         
         const opt = {
-          margin:       0, // No margins needed since the page matches the content exactly
+          margin:       0,
           filename:     'Portfolio_Overview_Dashboard.pdf',
           image:        { type: 'jpeg', quality: 1 },
           html2canvas:  { 
             scale: 2, 
             useCORS: true, 
             backgroundColor: '#f4f6f9',
-            // Force the canvas to match the exact size
             windowWidth: dashboardWidth,
             width: dashboardWidth,
             height: dashboardHeight
           },
           jsPDF: { 
             unit: 'px', 
-            // Create a custom PDF page exactly the size of the dashboard
             format: [dashboardWidth, dashboardHeight], 
             orientation: dashboardWidth > dashboardHeight ? 'landscape' : 'portrait' 
           } 
@@ -1449,7 +1509,10 @@ export default {
     },
 
     buildTimelineForm(base = {}, pruneOldYears = false) {
-      const form = { ...base };
+      const form = { 
+        sitesArray: [], // <--- CRUCIAL FIX: Force array initialization
+        ...base 
+      };
       const selectedYearKeys = new Set(this.trackingYears.map(year => `year${year}`));
 
       if (pruneOldYears) {
@@ -1717,11 +1780,21 @@ export default {
       ];
     },
 
+    timelineColumnDefs() {
+      return [
+        { label: 'Target G1 Date', field: 'targetG1Date', type: 'date', width: '130px', hidden: true },
+        { label: 'Target G2 Date', field: 'targetG2Date', type: 'date', width: '130px', hidden: true },
+        { label: 'Target G3 Date', field: 'targetG3Date', type: 'date', width: '130px', hidden: true },
+        { label: 'Target Closed Date', field: 'targetClosedDate', type: 'date', width: '150px', hidden: true }
+      ];
+    },
+
     allColumnDefs() {
       return [
         ...this.baseColumnDefs(),
         ...this.yearColumnDefs(),
-        ...this.kpiColumnDefs()
+        ...this.kpiColumnDefs(),
+        ...this.timelineColumnDefs()
       ];
     },
 
@@ -1763,6 +1836,25 @@ export default {
       this.hiddenColumns = {};
       this.allColumnDefs().forEach(col => {
         this.hiddenColumns[col.field] = !financialFields.has(col.field);
+      });
+
+      this.rebuildTableColumns();
+    },
+
+    setTimelineView() {
+      const timelineFields = new Set([
+        'projectName',
+        'projectStatus',
+        'currentPmoGate',
+        'targetG1Date',
+        'targetG2Date',
+        'targetG3Date',
+        'targetClosedDate'
+      ]);
+
+      this.hiddenColumns = {};
+      this.allColumnDefs().forEach(col => {
+        this.hiddenColumns[col.field] = !timelineFields.has(col.field);
       });
 
       this.rebuildTableColumns();
@@ -1813,6 +1905,10 @@ export default {
     formatMillions(value) {
       if (!value) return '$0.00M';
       return '$' + (Number(value) / 1000000).toFixed(2) + 'M';
+    },
+    formatDate(val) {
+      if (!val) return '-';
+      return String(val).slice(0, 10);
     },
 
     // -------------------------------------------------
@@ -2001,7 +2097,13 @@ export default {
     // -------------------------------------------------
     startInlineEdit(row, field, currentValue) {
       this.editingCell = { rowId: row.projectId, field };
-      this.editValue = currentValue;
+      
+      // Standardize date fields for the input calendar UI if it's a date field
+      if (['targetG1Date', 'targetG2Date', 'targetG3Date', 'targetClosedDate'].includes(field)) {
+        this.editValue = currentValue ? String(currentValue).slice(0, 10) : '';
+      } else {
+        this.editValue = currentValue;
+      }
     },
     cancelInlineEdit() {
       this.editingCell = { rowId: null, field: null };
@@ -2022,7 +2124,11 @@ export default {
         'dtitInvolved',
         'aiAaAType',
         'foakNoak',
-        'comment'
+        'comment',
+        'targetG1Date',
+        'targetG2Date',
+        'targetG3Date',
+        'targetClosedDate'
       ];
 
       if (!stringFields.includes(field)) {
@@ -2056,7 +2162,8 @@ export default {
         projectName: '',
         projectStatus: '',
         pillars: '',
-        sites: '',
+        sites: '', 
+        sitesArray: [], // Used strictly for multi-checkbox UI
         currentPmoGate: '',
         dtitInvolved: '',
         aiAaAType: '',
@@ -2071,7 +2178,11 @@ export default {
         yieldValue: null,
         yieldPercentGain: null,
         qualityValue: null,
-        qualityCases: null
+        qualityCases: null,
+        targetG1Date: null,
+        targetG2Date: null,
+        targetG3Date: null,
+        targetClosedDate: null
       };
 
       this.trackingYears.forEach(year => {
@@ -2089,6 +2200,18 @@ export default {
       if (!this.selectedRow) return alert('Please select a row to update.');
 
       this.updateForm = this.buildTimelineForm({ ...this.selectedRow }, false);
+      
+      // Load sites into checkbox array safely with String cast
+      this.updateForm.sitesArray = this.selectedRow.sites 
+        ? String(this.selectedRow.sites).split(',').map(s => s.trim()) 
+        : [];
+
+      // Ensure target dates fit the HTML date input perfectly (YYYY-MM-DD)
+      this.updateForm.targetG1Date = this.selectedRow.targetG1Date ? String(this.selectedRow.targetG1Date).slice(0, 10) : null;
+      this.updateForm.targetG2Date = this.selectedRow.targetG2Date ? String(this.selectedRow.targetG2Date).slice(0, 10) : null;
+      this.updateForm.targetG3Date = this.selectedRow.targetG3Date ? String(this.selectedRow.targetG3Date).slice(0, 10) : null;
+      this.updateForm.targetClosedDate = this.selectedRow.targetClosedDate ? String(this.selectedRow.targetClosedDate).slice(0, 10) : null;
+
       this.showUpdateForm = true;
       this.showAddForm = false;
     },
@@ -2099,6 +2222,10 @@ export default {
     async submitAddForm() {
       this.isProcessing = true;
       this.processingMessage = 'Creating Project Metadata...';
+      
+      // Combine checked array into string for DB safely
+      this.addForm.sites = Array.isArray(this.addForm.sitesArray) ? this.addForm.sitesArray.join(', ') : '';
+
       try {
         const response = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/manager-yearly`, {
           method: 'POST',
@@ -2131,6 +2258,10 @@ export default {
     async submitUpdateForm() {
       this.isProcessing = true;
       this.processingMessage = 'Updating Project Data...';
+      
+      // Combine checked array into string for DB safely
+      this.updateForm.sites = Array.isArray(this.updateForm.sitesArray) ? this.updateForm.sitesArray.join(', ') : '';
+
       try {
         const response = await this.apiFetch(
           `${process.env.VUE_APP_API_URL}/api/manager-yearly/${this.updateForm.projectId}`,
@@ -2511,8 +2642,6 @@ export default {
   padding: 12px 16px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   border: 1px solid #e0e6ed;
-  width: 100%;             /* <--- Ensure card doesn't exceed grid box */
-  box-sizing: border-box;  /* <--- Include padding in width math */
 }
 .chart-header {
   border-bottom: 2px solid #eee;
@@ -2701,6 +2830,28 @@ export default {
   border: 1px solid #ccc;
   border-radius: 4px;
   background-color: white;
+}
+.checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background-color: #f8f9fb;
+}
+.checkbox-group label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 0;
+  cursor: pointer;
+}
+.checkbox-group input {
+  width: auto;
+  cursor: pointer;
 }
 .form-group input:disabled,
 .form-group select:disabled {
