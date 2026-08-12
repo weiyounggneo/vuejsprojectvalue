@@ -1670,6 +1670,23 @@ app.get('/api/manager-yearly', authenticateToken, async (req, res) => {
   }
 });
 
+// Manager Phases (Ledger) Route for Gantt Chart
+app.get('/api/manager-phases', authenticateToken, async (req, res) => {
+  const trace = traceStart('GET /api/manager-phases', req);
+  try {
+    const rows = await bemQueryPromise(
+      `SELECT * FROM ${MANAGER_PHASES_TABLE} ORDER BY start_date ASC`, 
+      [], req
+    );
+    traceEnd(trace, { outcome: 'success', rowCount: rows.length });
+    return res.json(rows);
+  } catch (err) {
+    traceError(trace, err);
+    return res.status(500).json({ message: err.message });
+  }
+});
+
+
 // Manager Site Targets Route
 app.get('/api/manager-site-targets', authenticateToken, async (req, res) => {
   const trace = traceStart('GET /api/manager-site-targets', req);
