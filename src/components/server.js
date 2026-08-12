@@ -35,6 +35,7 @@ const MANAGER_YEARLY_TABLE = 't_manager_yearly_savings';
 const MANAGER_METRICS_TABLE = 't_manager_metrics';
 const MANAGER_COMMENTS_TABLE = 't_manager_comments';
 const MANAGER_HISTORY_TABLE = 't_manager_history';
+const MANAGER_SITE_TARGETS_TABLE = 't_manager_site_targets'; 
 
 const app = express();
 
@@ -1664,13 +1665,26 @@ app.get('/api/manager-yearly', authenticateToken, async (req, res) => {
   }
 });
 
-// NEW: Global Audit Log Route
+// NEW: Manager Site Targets Route
+app.get('/api/manager-site-targets', authenticateToken, async (req, res) => {
+  const trace = traceStart('GET /api/manager-site-targets', req);
+  try {
+    const rows = await bemQueryPromise(`SELECT * FROM ${MANAGER_SITE_TARGETS_TABLE}`, [], req);
+    traceEnd(trace, { outcome: 'success', rowCount: rows.length });
+    return res.json(rows);
+  } catch (err) {
+    traceError(trace, err);
+    return res.status(500).json({ message: err.message });
+  }
+});
+
+// Global Audit Log Route
 app.get('/api/manager-yearly/history/all', authenticateToken, requireAdmin, async (req, res) => {
   const trace = traceStart('GET /api/manager-yearly/history/all', req);
   try {
     const rows = await bemQueryPromise(
       `SELECT 
-         history_id, project_id, project_name, project_status,
+         history_id, project_id, project_name, project_status, 
          capacity_gain_value, capacity_gain_pct, dl_value, dl_equivalent,
          idl_value, idl_fte, yield_value, yield_gain_pct, quality_value, quality_cases, comment_text,
          changed_by, DATE_FORMAT(changed_at, '%Y-%m-%d %H:%i:%s') AS changed_at, 
@@ -1687,14 +1701,14 @@ app.get('/api/manager-yearly/history/all', authenticateToken, requireAdmin, asyn
   }
 });
 
-// NEW: Project-Level History Route
+// Project-Level History Route
 app.get('/api/manager-yearly/:projectId/history', authenticateToken, async (req, res) => {
   const trace = traceStart('GET /api/manager-yearly/:projectId/history', req);
   try {
     const projectId = req.params.projectId;
     const rows = await bemQueryPromise(
       `SELECT 
-         history_id, project_id, project_name, 
+         history_id, project_id, project_name, project_status, 
          capacity_gain_value, capacity_gain_pct, dl_value, dl_equivalent,
          idl_value, idl_fte, yield_value, yield_gain_pct, quality_value, quality_cases, comment_text,
          changed_by, DATE_FORMAT(changed_at, '%Y-%m-%d %H:%i:%s') AS changed_at, 
@@ -1720,7 +1734,7 @@ app.post('/api/manager-yearly', authenticateToken, requireAdmin, async (req, res
     const payload = {
       project_id: normalizeText(req.body.projectId),
       project_name: normalizeText(req.body.projectName),
-      project_status: normalizeText(req.body.projectStatus), // <--- ADD THIS
+      project_status: normalizeText(req.body.projectStatus),
       pillars: normalizeText(req.body.pillars),
       sites: normalizeText(req.body.sites),
       current_pmo_gate: normalizeText(req.body.currentPmoGate),
@@ -1772,7 +1786,7 @@ app.put('/api/manager-yearly/:projectId', authenticateToken, requireAdmin, async
     // --- 0. LOG HISTORY BEFORE UPDATE ---
     const currentState = await bemQueryPromise(`
       SELECT 
-        p.project_name,p.project_status, 
+        p.project_name, p.project_status,
         m.capacity_gain_value, m.capacity_gain_pct, m.dl_value, m.dl_equivalent, 
         m.idl_value, m.idl_fte, m.yield_value, m.yield_gain_pct, 
         m.quality_value, m.quality_cases, 
@@ -1791,15 +1805,14 @@ app.put('/api/manager-yearly/:projectId', authenticateToken, requireAdmin, async
           project_id, project_name, project_status, capacity_gain_value, capacity_gain_pct, 
           dl_value, dl_equivalent, idl_value, idl_fte, yield_value, yield_gain_pct, 
           quality_value, quality_cases, comment_text, changed_by, action_type
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'UPDATE')
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'UPDATE')
       `, [
-        projectId, curr.project_name, curr.capacity_gain_value, curr.capacity_gain_pct,
+        projectId, curr.project_name, curr.project_status, curr.capacity_gain_value, curr.capacity_gain_pct,
         curr.dl_value, curr.dl_equivalent, curr.idl_value, curr.idl_fte, curr.yield_value, curr.yield_gain_pct,
         curr.quality_value, curr.quality_cases, curr.comment_text, currentUser
       ], req);
     }
 
-    // --- 1. Update Project Master (Metadata) ---
     // --- 1. Update Project Master (Metadata) ---
     if (req.body.projectName) {
       await bemQueryPromise(
@@ -1807,15 +1820,9 @@ app.put('/api/manager-yearly/:projectId', authenticateToken, requireAdmin, async
          SET project_name = ?, project_status = ?, pillar = ?, site = ?, current_pmo_gate = ?, dtit_involved = ?, ai_type = ?, foak_noak = ? 
          WHERE project_id = ?`,
         [
-          normalizeText(req.body.projectName), 
-          normalizeText(req.body.projectStatus), // <--- ADD THIS
-          normalizeText(req.body.pillars), 
-          normalizeText(req.body.sites),
-          normalizeText(req.body.currentPmoGate), 
-          normalizeText(req.body.dtitInvolved), 
-          normalizeText(req.body.aiAaAType),
-          normalizeText(req.body.foakNoak), 
-          projectId
+          normalizeText(req.body.projectName), normalizeText(req.body.projectStatus), normalizeText(req.body.pillars), normalizeText(req.body.sites),
+          normalizeText(req.body.currentPmoGate), normalizeText(req.body.dtitInvolved), normalizeText(req.body.aiAaAType),
+          normalizeText(req.body.foakNoak), projectId
         ], req
       );
     }
