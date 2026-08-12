@@ -52,6 +52,13 @@
       >
         Portfolio Overview
       </button>
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'timeline' }"
+        @click="activeTab = 'timeline'"
+      >
+        Project Timeline
+      </button>
     </div>
 
     <!-- ========================================== -->
@@ -205,18 +212,7 @@
                 <!-- Editing Mode -->
                 <span v-if="editingCell.rowId === props.row.projectId && editingCell.field === props.column.field">
                   <input
-                    v-if="props.column.type === 'text'"
-                    type="text"
-                    v-model="editValue"
-                    @blur="saveInlineEdit(props.row)"
-                    @keyup.enter="saveInlineEdit(props.row)"
-                    @keyup.esc="cancelInlineEdit"
-                    v-focus
-                    class="inline-input"
-                    style="width: 100%; min-width: 150px;"
-                  />
-                  <input
-                    v-else-if="props.column.type === 'date'"
+                    v-if="props.column.formatType === 'date'"
                     type="date"
                     v-model="editValue"
                     @blur="saveInlineEdit(props.row)"
@@ -225,6 +221,17 @@
                     v-focus
                     class="inline-input"
                     style="width: 100%; min-width: 140px;"
+                  />
+                  <input
+                    v-else-if="props.column.type === 'text'"
+                    type="text"
+                    v-model="editValue"
+                    @blur="saveInlineEdit(props.row)"
+                    @keyup.enter="saveInlineEdit(props.row)"
+                    @keyup.esc="cancelInlineEdit"
+                    v-focus
+                    class="inline-input"
+                    style="width: 100%; min-width: 150px;"
                   />
                   <input
                     v-else
@@ -253,7 +260,7 @@
                   <template v-else-if="props.column.formatType === 'percent'">
                     {{ formatPercent(props.row[props.column.field]) }}
                   </template>
-                  <template v-else-if="props.column.type === 'date'">
+                  <template v-else-if="props.column.formatType === 'date'">
                     {{ formatDate(props.row[props.column.field]) }}
                   </template>
                   <template v-else>
@@ -535,6 +542,124 @@
 
       <div v-else class="no-data-message" style="margin: 40px; text-align: center;">
         No project data available to analyze. Please add data in the Grid tab.
+      </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 3: PROJECT TIMELINE                    -->
+    <!-- ========================================== -->
+    <div v-if="activeTab === 'timeline'" class="analytics-section">
+      <div v-if="rows.length > 0" class="analytics-layout">
+        
+        <!-- HEADER & TIMELINE FILTERS -->
+        <div class="analytics-shared-header">
+          <h2 class="section-title">Project Timeline & Milestones</h2>
+          <div class="global-filter-bar">
+            <select v-model="timelineFilter.site" class="timeline-select">
+              <option value="ALL">All Sites</option>
+              <option v-for="site in analyticsSiteOptions" :key="site" :value="site">{{ site }}</option>
+            </select>
+            <select v-model="timelineFilter.pillar" class="timeline-select">
+              <option value="ALL">All Pillars</option>
+              <option v-for="pillar in uniquePillars" :key="pillar" :value="pillar">{{ pillar }}</option>
+            </select>
+            <select v-model="timelineFilter.status" class="timeline-select">
+              <option value="ALL">All Statuses</option>
+              <option value="Ongoing">Ongoing</option>
+              <option value="Closed">Closed</option>
+              <option value="G1">G1</option>
+              <option value="G2">G2</option>
+              <option value="G3">G3</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- GANTT CHART SECTION -->
+        <div class="chart-card">
+          <div class="chart-header">
+            <h3 class="chart-title">Proposed Phase Timelines</h3>
+          </div>
+          <div class="gantt-scroll-container">
+            <apexchart
+              type="rangeBar"
+              :height="ganttChartHeight"
+              :options="ganttChartOptions"
+              :series="ganttChartSeries"
+            ></apexchart>
+          </div>
+        </div>
+
+        <div class="summary-tables-section" style="margin-top: 4px;">
+          <!-- MILESTONE TRACKING TABLE -->
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3 class="chart-title">Milestone Tracking</h3>
+            </div>
+            <div class="table-responsive" style="max-height: 350px; overflow-y: auto;">
+              <table class="summary-table">
+                <thead style="position: sticky; top: 0; z-index: 10;">
+                  <tr>
+                    <th>Project Name</th>
+                    <th>Current Status</th>
+                    <th>Target G1</th>
+                    <th>Actual G1</th>
+                    <th>Target G2</th>
+                    <th>Actual G2</th>
+                    <th>Target G3</th>
+                    <th>Actual G3</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in filteredTimelineRows" :key="item.projectId">
+                    <td><strong>{{ item.projectName }}</strong></td>
+                    <td><span class="badge">{{ item.projectStatus || '-' }}</span></td>
+                    <td>{{ formatDate(item.targetG1Date) }}</td>
+                    <td class="pending-cell">Pending</td>
+                    <td>{{ formatDate(item.targetG2Date) }}</td>
+                    <td class="pending-cell">Pending</td>
+                    <td>{{ formatDate(item.targetG3Date) }}</td>
+                    <td class="pending-cell">Pending</td>
+                  </tr>
+                  <tr v-if="filteredTimelineRows.length === 0">
+                    <td colspan="8" style="text-align: center; color: #666;">No projects found for the selected filters.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- PIPELINE VELOCITY TABLE (Placeholder for Ledger Hookup) -->
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3 class="chart-title">Pipeline Velocity (Monthly Throughput)</h3>
+            </div>
+            <div class="table-responsive" style="max-height: 350px; overflow-y: auto;">
+              <table class="summary-table">
+                <thead style="position: sticky; top: 0; z-index: 10;">
+                  <tr>
+                    <th>Month</th>
+                    <th style="text-align: center;">Entered G1</th>
+                    <th style="text-align: center;">Entered G2</th>
+                    <th style="text-align: center;">Entered G3</th>
+                    <th style="text-align: center;">Total Transitions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td colspan="5" style="text-align: center; color: #666; padding: 30px;">
+                      <em>Backend ledger integration pending to calculate historical monthly velocity.</em>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div v-else class="no-data-message" style="margin: 40px; text-align: center;">
+        No project data available to display timeline. Please add data in the Grid tab.
       </div>
     </div>
 
@@ -949,6 +1074,13 @@ export default {
         selectedSite: 'ALL'
       },
 
+      // Project Timeline specific filters
+      timelineFilter: {
+        site: 'ALL',
+        pillar: 'ALL',
+        status: 'ALL'
+      },
+
       // Global Page State
       activeTab: 'grid',
       isProcessing: false,
@@ -1349,6 +1481,103 @@ export default {
     },
 
     // ==========================================
+    // PROJECT TIMELINE (GANTT) LOGIC
+    // ==========================================
+    filteredTimelineRows() {
+      return this.rows.filter(row => {
+        let matchSite = true;
+        if (this.timelineFilter.site !== 'ALL') {
+          matchSite = row.sites && (String(row.sites).includes(this.timelineFilter.site) || String(row.sites).includes('ALL'));
+        }
+        
+        let matchPillar = true;
+        if (this.timelineFilter.pillar !== 'ALL') {
+          matchPillar = row.pillars === this.timelineFilter.pillar;
+        }
+        
+        let matchStatus = true;
+        if (this.timelineFilter.status !== 'ALL') {
+          matchStatus = row.projectStatus === this.timelineFilter.status;
+        }
+
+        return matchSite && matchPillar && matchStatus;
+      });
+    },
+
+    ganttChartHeight() {
+    
+      const projectCount = this.filteredTimelineRows.length;
+      const baseHeight = 180;
+      const dynamicHeight = baseHeight + (projectCount * 32);
+      return projectCount === 0 ? 300 : Math.min(dynamicHeight, 600);
+      
+    },
+
+    ganttChartSeries() {
+      const g1Data = [];
+      const g2Data = [];
+      const g3Data = [];
+
+      this.filteredTimelineRows.forEach(row => {
+        const tG1 = row.targetG1Date ? new Date(row.targetG1Date).getTime() : null;
+        const tG2 = row.targetG2Date ? new Date(row.targetG2Date).getTime() : null;
+        const tG3 = row.targetG3Date ? new Date(row.targetG3Date).getTime() : null;
+        const tClosed = row.targetClosedDate ? new Date(row.targetClosedDate).getTime() : null;
+
+        // Plot bars sequentially if valid dates exist
+        if (tG1 && tG2 && tG2 >= tG1) {
+          g1Data.push({ x: row.projectName, y: [tG1, tG2] });
+        }
+        if (tG2 && tG3 && tG3 >= tG2) {
+          g2Data.push({ x: row.projectName, y: [tG2, tG3] });
+        }
+        if (tG3 && tClosed && tClosed >= tG3) {
+          g3Data.push({ x: row.projectName, y: [tG3, tClosed] });
+        }
+      });
+
+      return [
+        { name: 'Proposed G1 Phase', data: g1Data },
+        { name: 'Proposed G2 Phase', data: g2Data },
+        { name: 'Proposed G3 Phase', data: g3Data }
+      ];
+    },
+
+    ganttChartOptions() {
+      return {
+        chart: {
+          type: 'rangeBar',
+          fontFamily: 'Arial, sans-serif',
+          toolbar: { show: true },
+          animations: { enabled: false }
+        },
+        plotOptions: {
+          bar: {
+            horizontal: true,
+            barHeight: '60%',
+            rangeBarGroupRows: true // Places overlapping/sequential series natively on the same project row
+          }
+        },
+        colors: ['#124076', '#117A65', '#6C3483'], // Navy, Teal, Amethyst mapping
+        xaxis: {
+          type: 'datetime',
+          labels: { style: { fontSize: '12px' } }
+        },
+        yaxis: {
+          labels: { style: { fontSize: '13px', fontWeight: 600 } }
+        },
+        legend: {
+          position: 'top',
+          horizontalAlign: 'left'
+        },
+        tooltip: {
+          x: { format: 'dd MMM yyyy' }
+        },
+        noData: { text: 'No timeline data available for selected filters.' }
+      };
+    },
+
+    // ==========================================
     // STATIC PIE CHARTS (Filtered)
     // ==========================================
     dtitPieData() {
@@ -1419,8 +1648,8 @@ export default {
     // PDF EXPORT
     // -------------------------------------------------
     async exportToPDF() {
-      if (this.activeTab !== 'analytics') {
-        alert('Please switch to the Portfolio Overview tab to export the dashboard.');
+      if (this.activeTab !== 'analytics' && this.activeTab !== 'timeline') {
+        alert('Please switch to the Portfolio Overview or Project Timeline tab to export the dashboard.');
         return;
       }
 
@@ -1428,6 +1657,7 @@ export default {
       this.processingMessage = 'Generating single-page PDF... This may take a few seconds.';
 
       try {
+        // Target the active visual tab safely
         const element = document.querySelector('.analytics-section');
         
         // Grab the exact real-time dimensions of your dashboard
@@ -1436,7 +1666,7 @@ export default {
         
         const opt = {
           margin:       0,
-          filename:     'Portfolio_Overview_Dashboard.pdf',
+          filename:     this.activeTab === 'analytics' ? 'Portfolio_Overview_Dashboard.pdf' : 'Project_Timeline_Dashboard.pdf',
           image:        { type: 'jpeg', quality: 1 },
           html2canvas:  { 
             scale: 2, 
@@ -1510,7 +1740,7 @@ export default {
 
     buildTimelineForm(base = {}, pruneOldYears = false) {
       const form = { 
-        sitesArray: [], // <--- CRUCIAL FIX: Force array initialization
+        sitesArray: [], 
         ...base 
       };
       const selectedYearKeys = new Set(this.trackingYears.map(year => `year${year}`));
@@ -1782,10 +2012,10 @@ export default {
 
     timelineColumnDefs() {
       return [
-        { label: 'Target G1 Date', field: 'targetG1Date', type: 'date', width: '130px', hidden: true },
-        { label: 'Target G2 Date', field: 'targetG2Date', type: 'date', width: '130px', hidden: true },
-        { label: 'Target G3 Date', field: 'targetG3Date', type: 'date', width: '130px', hidden: true },
-        { label: 'Target Closed Date', field: 'targetClosedDate', type: 'date', width: '150px', hidden: true }
+        { label: 'Target G1 Date', field: 'targetG1Date', type: 'text', formatType: 'date', width: '130px', hidden: true },
+        { label: 'Target G2 Date', field: 'targetG2Date', type: 'text', formatType: 'date', width: '130px', hidden: true },
+        { label: 'Target G3 Date', field: 'targetG3Date', type: 'text', formatType: 'date', width: '130px', hidden: true },
+        { label: 'Target Closed Date', field: 'targetClosedDate', type: 'text', formatType: 'date', width: '150px', hidden: true }
       ];
     },
 
@@ -2473,14 +2703,14 @@ export default {
   font-weight: 600;
 }
 
-/* Analytics Shared Header & Summary Tables */
+/* Analytics & Timeline Shared Classes */
 .analytics-section {
   padding: 16px 20px;
 }
 .analytics-layout {
   display: flex;
   flex-direction: column;
-  gap: 12px; /* Compressed layout gap */
+  gap: 12px;
 }
 .analytics-shared-header {
   display: flex;
@@ -2506,6 +2736,32 @@ export default {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* Timeline Specific Styles */
+.timeline-select {
+  padding: 8px 16px;
+  border: 1px solid #e0e6ed;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background-color: #fff;
+  color: #333;
+  font-weight: 600;
+  outline: none;
+  cursor: pointer;
+}
+.timeline-select:hover {
+  border-color: #1f5fa8;
+}
+.gantt-scroll-container {
+  height: 600px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.pending-cell {
+  color: #999;
+  font-size: 0.85em;
+  font-style: italic;
 }
 
 /* Executive Cards CSS */
@@ -2555,13 +2811,8 @@ export default {
 }
 
 .bg-overall { background: linear-gradient(135deg, #1E3A8A, #2563EB); }
-/* G1: Dark Navy */
 .bg-g1 { background: linear-gradient(135deg, #0A2D55, #124076); } 
-
-/* G2: Deep Teal / Cyan */
 .bg-g2 { background: linear-gradient(135deg, #4A235A, #6C3483); } 
-
-/* G3: Dark Steel Blue */
 .bg-g3 { background: linear-gradient(135deg, #312E81, #4F46E5); }
 
 /* Summary Tables CSS */
@@ -2633,7 +2884,7 @@ export default {
 /* Pie Charts CSS */
 .piecharts-section {
   display: grid;
-  grid-template-columns: repeat(4, 1fr); /* 4 Charts in a single row */
+  grid-template-columns: repeat(4, 1fr);
   gap: 16px;
 }
 .chart-card {
