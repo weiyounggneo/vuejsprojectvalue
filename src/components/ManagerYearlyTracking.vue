@@ -337,7 +337,7 @@
         <div class="analytics-shared-header">
           <h2 class="section-title">Executive Performance Overview</h2>
           <div class="global-filter-bar">
-            <span class="sidebar-title">Dashboard Site Filter:</span>
+            <span class="sidebar-title">Site Filter:</span>
             <button
               class="site-btn"
               :class="{ active: dashboardFilter.selectedSite === 'ALL' }"
@@ -555,22 +555,23 @@
         <div class="analytics-shared-header">
           <h2 class="section-title">Project Timeline & Milestones</h2>
           <div class="global-filter-bar">
-            <select v-model="timelineFilter.site" class="timeline-select">
-              <option value="ALL">All Sites</option>
-              <option v-for="site in analyticsSiteOptions" :key="site" :value="site">{{ site }}</option>
-            </select>
-            <select v-model="timelineFilter.pillar" class="timeline-select">
-              <option value="ALL">All Pillars</option>
-              <option v-for="pillar in uniquePillars" :key="pillar" :value="pillar">{{ pillar }}</option>
-            </select>
-            <select v-model="timelineFilter.status" class="timeline-select">
-              <option value="ALL">All Statuses</option>
-              <option value="Ongoing">Ongoing</option>
-              <option value="Closed">Closed</option>
-              <option value="G1">G1</option>
-              <option value="G2">G2</option>
-              <option value="G3">G3</option>
-            </select>
+            <span class="sidebar-title">Site Filter:</span>
+            <button
+              class="site-btn"
+              :class="{ active: timelineFilter.site === 'ALL' }"
+              @click="timelineFilter.site = 'ALL'"
+            >
+              All Sites
+            </button>
+            <button
+              v-for="site in analyticsSiteOptions"
+              :key="site"
+              class="site-btn"
+              :class="{ active: timelineFilter.site === site }"
+              @click="timelineFilter.site = site"
+            >
+              {{ site }}
+            </button>
           </div>
         </div>
 
@@ -650,12 +651,12 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(row, index) in velocityData" :key="index">
+                <tr v-for="(row, index) in velocityData.slice(0, 6)" :key="index">
                   <td><strong>{{ row.month }}</strong></td>
                   <td style="text-align: center; color: #124076; font-weight: 600;">{{ row.g1 }}</td>
                   <td style="text-align: center; color: #117A65; font-weight: 600;">{{ row.g2 }}</td>
                   <td style="text-align: center; color: #6C3483; font-weight: 600;">{{ row.g3 }}</td>
-                  <td style="text-align: center; font-weight: bold; background-color: #f8f9fb;">{{ row.total }}</td>
+                  <td style="text-align: center; font-weight: 800; font-size: 1.05rem; background-color: #f8f9fb;">{{ row.total }}</td>
                 </tr>
                 <tr v-if="velocityData.length === 0">
                   <td colspan="5" style="text-align: center; color: #666; padding: 30px;">
@@ -1085,11 +1086,9 @@ export default {
         selectedSite: 'ALL'
       },
 
-      // Project Timeline specific filters
+      // Project Timeline specific filters (Updated to only use site)
       timelineFilter: {
-        site: 'ALL',
-        pillar: 'ALL',
-        status: 'ALL'
+        site: 'ALL'
       },
 
       // Global Page State
@@ -1497,22 +1496,8 @@ export default {
     // ==========================================
     filteredTimelineRows() {
       return this.rows.filter(row => {
-        let matchSite = true;
-        if (this.timelineFilter.site !== 'ALL') {
-          matchSite = row.sites && (String(row.sites).includes(this.timelineFilter.site) || String(row.sites).includes('ALL'));
-        }
-        
-        let matchPillar = true;
-        if (this.timelineFilter.pillar !== 'ALL') {
-          matchPillar = row.pillars === this.timelineFilter.pillar;
-        }
-        
-        let matchStatus = true;
-        if (this.timelineFilter.status !== 'ALL') {
-          matchStatus = row.projectStatus === this.timelineFilter.status;
-        }
-
-        return matchSite && matchPillar && matchStatus;
+        if (this.timelineFilter.site === 'ALL') return true;
+        return row.sites && (String(row.sites).includes(this.timelineFilter.site) || String(row.sites).includes('ALL'));
       }); 
     },
 
