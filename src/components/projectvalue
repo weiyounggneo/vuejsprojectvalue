@@ -216,12 +216,13 @@
             </div>
 
             <div class="form-group">
-              <label for="week_end">Week End</label>
+              <label for="month_end">Month End</label>
               <input
-                id="week_end"
+                id="month_end"
                 type="date"
-                v-model="activeForm.week_end"
-                :disabled="isFieldDisabled('week_end')"
+                v-model="activeForm.month_end"
+                :disabled="isFieldDisabled('month_end')"
+                @change="snapToLastDayOfMonth"
               />
             </div>
 
@@ -305,7 +306,7 @@
     <!-- Row-Level History Modal -->
     <div v-if="showHistoryModal" class="modal-overlay">
       <div class="modal large-modal">
-        <h3>Version History: {{ selectedRow?.project_name }} ({{ selectedRow?.week_end }})</h3>
+        <h3>Version History: {{ selectedRow?.project_name }} ({{ selectedRow?.month_end }})</h3>
         
         <div v-if="isFetchingHistory" style="text-align: center; padding: 20px;">
            <div class="spinner" style="width: 24px; height: 24px; border-width: 3px;"></div>
@@ -452,7 +453,7 @@
     <div v-if="showOverwriteModal" class="modal-overlay">
       <div class="confirmationmessage">
         <h3 style="color: #d93025; margin-top: 0; border-bottom: none;">⚠️ Duplicate Data Detected</h3>
-        <p style="margin-bottom: 12px;">This Excel file contains data for week ending dates that already exist in the system for these projects.</p>
+        <p style="margin-bottom: 12px;">This Excel file contains data for month ending dates that already exist in the system for these projects.</p>
         <p>Would you like to overwrite the existing metrics with the new values from this file?</p>
         <div class="modal-actions" style="margin-top: 24px; justify-content: center; gap: 16px;">
           <button class="actions formButton" style="background: #d93025; color: white; border-color: #d93025;" @click="confirmOverwrite" :disabled="isProcessing">Yes, Overwrite</button>
@@ -547,7 +548,7 @@ export default {
         metric_id: null,
         project_name: '',
         project_code: '',
-        week_end: '',
+        month_end: '',
         capacity_improvement: '',
         yield_savings: '',
         people_productivity: '',
@@ -558,7 +559,7 @@ export default {
         metric_id: null,
         project_name: '',
         project_code: '',
-        week_end: '',
+        month_end: '',
         capacity_improvement: '',
         yield_savings: '',
         people_productivity: '',
@@ -587,7 +588,7 @@ export default {
         { label: 'Action', field: 'action_type' },
         { label: 'Metric ID', field: 'metric_id' },
         { label: 'Project Code', field: 'project_code' },
-        { label: 'Week End', field: 'week_end' },
+        { label: 'Month End', field: 'month_end' },
         { label: 'Capacity Impr.', field: 'capacity_improvement' },
         { label: 'Yield Savings', field: 'yield_savings' },
         { label: 'People Prod.', field: 'people_productivity' },
@@ -639,7 +640,7 @@ export default {
         'project_code',
         'project_name',
         'project_type',
-        'week_end',
+        'month_end',
         'capacity_improvement',
         'yield_savings',
         'people_productivity',
@@ -718,7 +719,7 @@ export default {
         const payload = {
           project_code: log.project_code,
           project_name: '', // The backend resolveProject will automatically map this via project_code
-          week_end: log.week_end,
+          month_end: log.month_end,
           capacity_improvement: log.capacity_improvement,
           yield_savings: log.yield_savings,
           people_productivity: log.people_productivity,
@@ -759,6 +760,25 @@ export default {
       }
     },
 
+    snapToLastDayOfMonth() {
+      if (!this.activeForm.month_end) return;
+
+      // Extract the year and month the user selected
+      const [year, month] = this.activeForm.month_end.split('-');
+      if (!year || !month) return;
+
+      // A neat JavaScript trick: Asking for the "0th" day of the NEXT month 
+      // automatically returns the exact last day of the CURRENT month.
+      const lastDay = new Date(year, month, 0);
+
+      const y = lastDay.getFullYear();
+      const m = String(lastDay.getMonth() + 1).padStart(2, '0');
+      const d = String(lastDay.getDate()).padStart(2, '0');
+
+      // Instantly overwrite the input field with the proper last day
+      this.activeForm.month_end = `${y}-${m}-${d}`;
+    },
+
     async openGlobalHistoryModal() {
       this.showGlobalHistoryModal = true;
       this.isFetchingGlobalHistory = true;
@@ -775,7 +795,7 @@ export default {
         // Format dates
         const formattedHistoricalRecords = historicalRecords.map(log => ({
           ...log,
-          week_end: this.formatDisplayDate(log.week_end)
+          month_end: this.formatDisplayDate(log.month_end)
         }));
 
         // Find only the Metric IDs that actually have a history
@@ -791,7 +811,7 @@ export default {
             action_type: 'CURRENT',
             metric_id: row.metric_id,
             project_code: row.project_code,
-            week_end: row.week_end,
+            month_end: row.month_end,
             capacity_improvement: row.capacity_improvement,
             yield_savings: row.yield_savings,
             people_productivity: row.people_productivity,
@@ -842,7 +862,7 @@ export default {
         // Format the dates for the historical records
         const formattedHistoricalRecords = historicalRecords.map(log => ({
           ...log,
-          week_end: this.formatDisplayDate(log.week_end)
+          month_end: this.formatDisplayDate(log.month_end)
         }));
 
         const currentState = {
@@ -900,7 +920,7 @@ export default {
         const payload = {
           project_code: row.project_code,
           project_name: row.project_name,
-          week_end: row.week_end, 
+          month_end: row.month_end, 
           capacity_improvement: field === 'capacity_improvement' ? newValue : row.capacity_improvement,
           yield_savings: field === 'yield_savings' ? newValue : row.yield_savings,
           people_productivity: field === 'people_productivity' ? newValue : row.people_productivity,
@@ -942,7 +962,7 @@ export default {
         metric_id: null,
         project_name: '',
         project_code: '',
-        week_end: '',
+        month_end: '',
         capacity_improvement: '',
         yield_savings: '',
         people_productivity: '',
@@ -956,7 +976,7 @@ export default {
         project_code: 'Project Code',
         project_name: 'Project Name',
         project_type: 'Project Type',
-        week_end: 'Week End',
+        month_end: 'Month End',
         capacity_improvement: 'Capacity Improvement',
         yield_savings: 'Yield Savings',
         people_productivity: 'People Productivity',
@@ -1055,7 +1075,7 @@ export default {
 
         const formattedData = data.map(row => ({
           ...row,
-          week_end: this.formatDisplayDate(row.week_end)
+          month_end: this.formatDisplayDate(row.month_end)
         }));
 
         this.rows = formattedData;
@@ -1187,7 +1207,7 @@ export default {
 
     openSpotfire() {
       if (this.isProcessing || this.isPageLoading) return;
-      window.open('https://spotfirecbeit.mua.st.com/spotfire/wp/OpenAnalysis?file=ac4fc7dd-24b0-4f94-922d-1184fedfca41', '_blank');
+      window.open('https://spotfirecbeit.mua.st.com/spotfire/wp/OpenAnalysis?file=4cfdf5f1-3884-44c5-aaf5-9380702d03d0', '_blank');
     },
 
     goBack() {
@@ -1226,7 +1246,7 @@ export default {
         metric_id: this.selectedRow.metric_id ?? null,
         project_name: this.selectedRow.project_name || '',
         project_code: this.selectedRow.project_code || '',
-        week_end: this.selectedRow.week_end ? String(this.selectedRow.week_end).slice(0, 10) : '',
+        month_end: this.selectedRow.month_end ? String(this.selectedRow.month_end).slice(0, 10) : '',
         capacity_improvement: this.selectedRow.capacity_improvement ?? '',
         yield_savings: this.selectedRow.yield_savings ?? '',
         people_productivity: this.selectedRow.people_productivity ?? '',
@@ -1249,7 +1269,7 @@ export default {
       return {
         project_code: form.project_code || null,
         project_name: form.project_name || null,
-        week_end: form.week_end || null,
+        month_end: form.month_end || null,
         capacity_improvement: form.capacity_improvement === '' ? null : Number(form.capacity_improvement),
         yield_savings: form.yield_savings === '' ? null : Number(form.yield_savings),
         people_productivity: form.people_productivity === '' ? null : Number(form.people_productivity),
@@ -1259,7 +1279,7 @@ export default {
 
     validateForm(form) {
       if (!form.project_name && !form.project_code) return 'Project is required.';
-      if (!form.week_end) return 'Week End is required.';
+      if (!form.month_end) return 'Month End is required.';
 
       if (
         form.capacity_improvement === '' &&
