@@ -91,21 +91,29 @@
 
     <!-- KPI SUMMARY CARDS -->
     <div class="kpi-summary-container" v-if="rows.length > 0">
-      <div class="kpi-card">
-        <div class="kpi-title">Total Capacity Improvement</div>
-        <div class="kpi-value">{{ formatCurrency(kpiTotals.capacity) }}</div>
+      <div class="metric-card bg-kpi-1">
+        <h4>Capacity Improvement</h4>
+        <div class="metric-content">
+          <span class="metric-value">{{ formatCurrency(kpiTotals.capacity) }}</span>
+        </div>
       </div>
-      <div class="kpi-card">
-        <div class="kpi-title">Total Yield Savings</div>
-        <div class="kpi-value">{{ formatCurrency(kpiTotals.yield) }}</div>
+      <div class="metric-card bg-kpi-2">
+        <h4>Yield Savings</h4>
+        <div class="metric-content">
+          <span class="metric-value">{{ formatCurrency(kpiTotals.yield) }}</span>
+        </div>
       </div>
-      <div class="kpi-card">
-        <div class="kpi-title">Total People Productivity</div>
-        <div class="kpi-value">{{ formatCurrency(kpiTotals.productivity) }}</div>
+      <div class="metric-card bg-kpi-3">
+        <h4>People Productivity</h4>
+        <div class="metric-content">
+          <span class="metric-value">{{ formatCurrency(kpiTotals.productivity) }}</span>
+        </div>
       </div>
-      <div class="kpi-card">
-        <div class="kpi-title">Total Quality Improvement</div>
-        <div class="kpi-value">{{ formatCurrency(kpiTotals.quality) }}</div>
+      <div class="metric-card bg-kpi-4">
+        <h4>Quality Improvement</h4>
+        <div class="metric-content">
+          <span class="metric-value">{{ formatCurrency(kpiTotals.quality) }}</span>
+        </div>
       </div>
     </div>
 
@@ -1560,31 +1568,48 @@ export default {
   margin: 16px 0 24px 0;
 }
 
-.kpi-card {
-  background: #ffffff;
-  border: 1px solid #e0e6ed;
-  border-left: 5px solid #1f5fa8;
-  border-radius: 8px;
-  padding: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+.metric-card {
+  padding: 20px 16px;
+  border-radius: 10px;
+  color: white;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   display: flex;
   flex-direction: column;
   justify-content: center;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
-.kpi-title {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: #6c757d;
+.metric-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+}
+
+.metric-card h4 {
+  margin: 0 0 10px 0;
+  font-size: 0.95rem;
   text-transform: uppercase;
-  margin-bottom: 8px;
+  letter-spacing: 0.5px;
+  opacity: 0.9;
+  font-weight: 600;
 }
 
-.kpi-value {
-  font-size: 1.4rem;
-  font-weight: 700;
-  color: #07254a;
+.metric-content {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
 }
+
+.metric-value {
+  font-size: 1.8rem;
+  font-weight: 800;
+}
+
+/* Vibrant, readable deep jewel tones (No Red) */
+.bg-kpi-1 { background: linear-gradient(135deg, #1E3A8A, #2563EB); } /* Cobalt Blue */
+.bg-kpi-2 { background: linear-gradient(135deg, #004D40, #117A65); } /* Deep Teal */
+.bg-kpi-3 { background: linear-gradient(135deg, #0A2D55, #124076); } /* Dark Navy */
+.bg-kpi-4 { background: linear-gradient(135deg, #4A235A, #6C3483); } /* Amethyst Purple */
 
 :deep(.wrap-text-cell) {
   white-space: normal !important;
