@@ -19,175 +19,243 @@
       </div>
     </div>
 
+    <!-- TOP NAVIGATION BAR (Excluded from PDF) -->
     <header class="top-bar">
       <div class="left">
         <img src="@/assets/st-logo.png" alt="ST Logo" class="logo" />
         <span class="title">
           Project Value Calculation <br />
-          Project Value Entry
+          {{ activeTab === 'grid' ? 'Project Value Entry' : 'Cumulative KPI Analytics' }}
         </span>
       </div>
 
       <div class="topbar-actions">
-        <button class="back-btn" @click="goBack" :disabled="isProcessing || isPageLoading">Back</button>
+        <button class="pdf-btn" @click="exportPDF" :disabled="isProcessing || isPageLoading">Export PDF</button>
         <button class="home-btn" @click="goHome" :disabled="isProcessing || isPageLoading">Home</button>
         <button class="spotfire-btn" @click="openSpotfire" :disabled="isProcessing || isPageLoading">Spotfire</button>
         <button class="logout-btn" @click="logout" :disabled="isProcessing || isPageLoading">Logout</button>
       </div>
     </header>
 
-    <div class="banner">{{ pageBanner }}</div>
+    <!-- WRAPPER FOR PDF EXPORT -->
+    <div ref="pdfExportArea" class="pdf-export-container">
+      
+      <div class="banner" v-if="activeTab === 'grid'">{{ pageBanner }}</div>
 
-    <div class="upload-section">
-      <label
-        class="uploadExport-label"
-        :style="{ pointerEvents: isProcessing || isPageLoading ? 'none' : 'auto', opacity: isProcessing || isPageLoading ? 0.6 : 1 }"
-      >
-        <input type="file" accept=".xlsx,.xls" @change="handleExcelImport" style="display: none;" />
-        <span class="upload-icon" title="Import Excel">
-          <img src="@/assets/excel.png" alt="Upload" class="icon-img" />
-          <span style="margin-left: 6px;">Import Excel</span>
-        </span>
-      </label>
-
-      <button class="export-btn" @click="exportData" :disabled="isProcessing || isPageLoading">
-        <img src="@/assets/export.png" title="Export Excel" alt="Export Excel" class="icon-img" />
-        Export Excel
-      </button>
-    </div>
-
-    <!-- DASHBOARD QUICK FILTERS -->
-    <div class="quick-filters-container" v-if="rows.length > 0">
-      <div class="quick-filter-group">
-        <label for="filter-project-name">Filter by Project Name:</label>
-        <select 
-          id="filter-project-name" 
-          v-model="columnFilters.project_name" 
-          @change="applyColumnFilters"
-          :disabled="isProcessing || isPageLoading"
+      <div class="upload-section" v-if="activeTab === 'grid'">
+        <label
+          class="uploadExport-label"
+          :style="{ pointerEvents: isProcessing || isPageLoading ? 'none' : 'auto', opacity: isProcessing || isPageLoading ? 0.6 : 1 }"
         >
-          <option value="">All Projects</option>
-          <option v-for="name in uniqueProjectNames" :key="name" :value="name">
-            {{ name }}
-          </option>
-        </select>
+          <input type="file" accept=".xlsx,.xls" @change="handleExcelImport" style="display: none;" />
+          <span class="upload-icon" title="Import Excel">
+            <img src="@/assets/excel.png" alt="Upload" class="icon-img" />
+            <span style="margin-left: 6px;">Import Excel</span>
+          </span>
+        </label>
+
+        <button class="export-btn" @click="exportData" :disabled="isProcessing || isPageLoading">
+          <img src="@/assets/export.png" title="Export Excel" alt="Export Excel" class="icon-img" />
+          Export Excel
+        </button>
       </div>
 
-      <div class="quick-filter-group">
-        <label for="filter-project-type">Filter by Project Type:</label>
-        <select 
-          id="filter-project-type" 
-          v-model="columnFilters.project_type" 
-          @change="applyColumnFilters"
-          :disabled="isProcessing || isPageLoading"
+      <!-- DASHBOARD QUICK FILTERS -->
+      <div class="quick-filters-container" v-if="rows.length > 0">
+        <div class="quick-filter-group">
+          <label for="filter-project-name">Filter by Project Name:</label>
+          <select 
+            id="filter-project-name" 
+            v-model="columnFilters.project_name" 
+            @change="applyColumnFilters"
+            :disabled="isProcessing || isPageLoading"
+          >
+            <option value="">All Projects</option>
+            <option v-for="name in uniqueProjectNames" :key="name" :value="name">
+              {{ name }}
+            </option>
+          </select>
+        </div>
+
+        <div class="quick-filter-group">
+          <label for="filter-project-type">Filter by Project Type:</label>
+          <select 
+            id="filter-project-type" 
+            v-model="columnFilters.project_type" 
+            @change="applyColumnFilters"
+            :disabled="isProcessing || isPageLoading"
+          >
+            <option value="">All Types</option>
+            <option v-for="type in uniqueProjectTypes" :key="type" :value="type">
+              {{ type }}
+            </option>
+          </select>
+        </div>
+
+        <!-- KPI Display Filter: Only visible on the Cumulative Analytics page -->
+        <div class="quick-filter-group" v-if="activeTab === 'charts'">
+          <label>Filter KPI Types:</label>
+          <div class="checkbox-group">
+            <label><input type="checkbox" value="capacity" v-model="selectedKPIs"> Capacity</label>
+            <label><input type="checkbox" value="yield" v-model="selectedKPIs"> Yield</label>
+            <label><input type="checkbox" value="productivity" v-model="selectedKPIs"> People</label>
+            <label><input type="checkbox" value="quality" v-model="selectedKPIs"> Quality</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- KPI SUMMARY CARDS -->
+      <div class="kpi-summary-container" v-if="rows.length > 0">
+        <div class="metric-card bg-kpi-1" v-if="selectedKPIs.includes('capacity')">
+          <h4>Capacity Improvement</h4>
+          <div class="metric-content">
+            <span class="metric-value">{{ formatCurrency(kpiTotals.capacity) }}</span>
+          </div>
+        </div>
+        <div class="metric-card bg-kpi-2" v-if="selectedKPIs.includes('yield')">
+          <h4>Yield Savings</h4>
+          <div class="metric-content">
+            <span class="metric-value">{{ formatCurrency(kpiTotals.yield) }}</span>
+          </div>
+        </div>
+        <div class="metric-card bg-kpi-3" v-if="selectedKPIs.includes('productivity')">
+          <h4>People Productivity</h4>
+          <div class="metric-content">
+            <span class="metric-value">{{ formatCurrency(kpiTotals.productivity) }}</span>
+          </div>
+        </div>
+        <div class="metric-card bg-kpi-4" v-if="selectedKPIs.includes('quality')">
+          <h4>Quality Improvement</h4>
+          <div class="metric-content">
+            <span class="metric-value">{{ formatCurrency(kpiTotals.quality) }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB NAVIGATION -->
+      <div class="tabs-container" v-if="rows.length > 0">
+        <button 
+          class="tab-btn" 
+          :class="{ active: activeTab === 'grid' }" 
+          @click="activeTab = 'grid'"
         >
-          <option value="">All Types</option>
-          <option v-for="type in uniqueProjectTypes" :key="type" :value="type">
-            {{ type }}
-          </option>
-        </select>
+          Data Grid
+        </button>
+        <button 
+          class="tab-btn" 
+          :class="{ active: activeTab === 'charts' }" 
+          @click="activeTab = 'charts'"
+        >
+          Cumulative KPI Analytics
+        </button>
       </div>
-    </div>
 
-    <!-- KPI SUMMARY CARDS -->
-    <div class="kpi-summary-container" v-if="rows.length > 0">
-      <div class="metric-card bg-kpi-1">
-        <h4>Capacity Improvement</h4>
-        <div class="metric-content">
-          <span class="metric-value">{{ formatCurrency(kpiTotals.capacity) }}</span>
+      <!-- TAB 1: DATA GRID -->
+      <div v-show="activeTab === 'grid'">
+        <div class="table-section" v-if="goodTableColumns.length > 0">
+          <div class="inline-edit-hint">
+            💡 <strong>Tip:</strong> Double-click any KPI metric (Capacity, Yield, People, Quality) in the table to edit it directly.
+          </div>
+
+          <vue-good-table
+            :columns="goodTableColumns"
+            :rows="filteredRows"
+            :pagination-options="{ enabled: true, perPage: 10 }"
+            :line-numbers="true"
+            @row-click="selectRow"
+            :rowStyleClass="rowClassFn"
+          >
+            <template #table-row="props">
+              <span v-if="['capacity_improvement', 'yield_savings', 'people_productivity', 'quality_improvement'].includes(props.column.field)">
+                
+                <span v-if="editingCell.rowId === props.row.metric_id && editingCell.field === props.column.field">
+                  <input
+                    type="number"
+                    step="any"
+                    v-model="editValue"
+                    @blur="saveInlineEdit(props.row)"
+                    @keyup.enter="saveInlineEdit(props.row)"
+                    @keyup.esc="cancelInlineEdit"
+                    v-focus
+                    class="inline-input"
+                  />
+                </span>
+                
+                <span 
+                  v-else 
+                  @dblclick.stop="startInlineEdit(props.row, props.column.field, props.row[props.column.field])" 
+                  class="editable-cell" 
+                  title="Double-click to edit"
+                >
+                  {{ props.formattedRow[props.column.field] }}
+                </span>
+              </span>
+              <span v-else>
+                {{ props.formattedRow[props.column.field] }}
+              </span>
+            </template>
+
+            <template #emptystate>
+              <div class="no-data-message">No data available.</div>
+            </template>
+          </vue-good-table>
+        </div>
+
+        <div class="actions">
+          <button @click="openAddForm" :disabled="isProcessing || isPageLoading">Add</button>
+          <button @click="openUpdateForm" :disabled="isProcessing || isPageLoading || !selectedRow">Update</button>
+          <button @click="openHistoryModal" :disabled="isProcessing || isPageLoading || !selectedRow">View History</button>
+          <button v-if="isAdmin" @click="openGlobalHistoryModal" :disabled="isProcessing || isPageLoading">Global Audit Log</button>
+          <button @click="openSearchForm = true" :disabled="isProcessing || isPageLoading">Search</button>
+          <button @click="clearFilter" :disabled="isProcessing || isPageLoading">Clear Filter</button>
+          <button @click="clearTableUI" :disabled="isProcessing || isPageLoading">Clear View</button>
+        </div>
+
+        <div v-if="selectedRow" class="audit-panel">
+          <h4>Selected Row Information</h4>
+          <div class="audit-grid">
+            <div><strong>Metric ID:</strong> {{ selectedRow.metric_id || '-' }}</div>
+            <div><strong>Project Code:</strong> {{ selectedRow.project_code || '-' }}</div>
+            <div><strong>Project Name:</strong> {{ selectedRow.project_name || '-' }}</div>
+            <div><strong>Project Type:</strong> {{ selectedRow.project_type || '-' }}</div>
+            <div><strong>Use Case Investment:</strong> {{ selectedRow.use_case_investment ?? '-' }}</div>
+          </div>
         </div>
       </div>
-      <div class="metric-card bg-kpi-2">
-        <h4>Yield Savings</h4>
-        <div class="metric-content">
-          <span class="metric-value">{{ formatCurrency(kpiTotals.yield) }}</span>
+
+      <!-- TAB 2: CUMULATIVE CHARTS (Dynamic Scaling Grid) -->
+      <div v-if="activeTab === 'charts'" class="charts-section">
+        <h3 class="chart-title">Cumulative Project Values Over Time</h3>
+        <p class="chart-subtitle">Displays the independent running sum for each KPI based on active filters.</p>
+        
+        <div v-if="selectedKPIs.length === 0" style="text-align: center; padding: 40px; color: #666; font-size: 1.1rem;">
+          No KPIs selected. Please check at least one KPI type above.
         </div>
-      </div>
-      <div class="metric-card bg-kpi-3">
-        <h4>People Productivity</h4>
-        <div class="metric-content">
-          <span class="metric-value">{{ formatCurrency(kpiTotals.productivity) }}</span>
+
+        <!-- NEW: Portfolio Cumulative Stacked Bar Chart (Moved to Top) -->
+        <div class="chart-card" style="margin-bottom: 24px;" v-if="selectedKPIs.length > 0">
+          <apexchart type="line" height="450" :options="stackedBarChartData.options" :series="stackedBarChartData.series"></apexchart>
         </div>
-      </div>
-      <div class="metric-card bg-kpi-4">
-        <h4>Quality Improvement</h4>
-        <div class="metric-content">
-          <span class="metric-value">{{ formatCurrency(kpiTotals.quality) }}</span>
+
+        <!-- Metric-Specific Line Charts (Moved Below) -->
+        <div class="charts-grid" :class="gridLayoutClass" v-if="selectedKPIs.length > 0">
+          <div class="chart-card" v-if="selectedKPIs.includes('capacity')">
+            <apexchart type="line" height="350" :options="chartData.capacity.options" :series="chartData.capacity.series"></apexchart>
+          </div>
+          <div class="chart-card" v-if="selectedKPIs.includes('yield')">
+            <apexchart type="line" height="350" :options="chartData.yield.options" :series="chartData.yield.series"></apexchart>
+          </div>
+          <div class="chart-card" v-if="selectedKPIs.includes('productivity')">
+            <apexchart type="line" height="350" :options="chartData.productivity.options" :series="chartData.productivity.series"></apexchart>
+          </div>
+          <div class="chart-card" v-if="selectedKPIs.includes('quality')">
+            <apexchart type="line" height="350" :options="chartData.quality.options" :series="chartData.quality.series"></apexchart>
+          </div>
         </div>
-      </div>
-    </div>
 
-    <!-- TABLE SECTION -->
-    <div class="table-section" v-if="goodTableColumns.length > 0">
-      <div class="inline-edit-hint">
-        💡 <strong>Tip:</strong> Double-click any KPI metric (Capacity, Yield, People, Quality) in the table to edit it directly.
       </div>
 
-      <vue-good-table
-        :columns="goodTableColumns"
-        :rows="filteredRows"
-        :pagination-options="{ enabled: true, perPage: 10 }"
-        :line-numbers="true"
-        @row-click="selectRow"
-        :rowStyleClass="rowClassFn"
-      >
-        <template #table-row="props">
-          <span v-if="['capacity_improvement', 'yield_savings', 'people_productivity', 'quality_improvement'].includes(props.column.field)">
-            
-            <span v-if="editingCell.rowId === props.row.metric_id && editingCell.field === props.column.field">
-              <input
-                type="number"
-                step="any"
-                v-model="editValue"
-                @blur="saveInlineEdit(props.row)"
-                @keyup.enter="saveInlineEdit(props.row)"
-                @keyup.esc="cancelInlineEdit"
-                v-focus
-                class="inline-input"
-              />
-            </span>
-            
-            <span 
-              v-else 
-              @dblclick.stop="startInlineEdit(props.row, props.column.field, props.row[props.column.field])" 
-              class="editable-cell" 
-              title="Double-click to edit"
-            >
-              {{ props.formattedRow[props.column.field] }}
-            </span>
-          </span>
-          <span v-else>
-            {{ props.formattedRow[props.column.field] }}
-          </span>
-        </template>
-
-        <template #emptystate>
-          <div class="no-data-message">No data available.</div>
-        </template>
-      </vue-good-table>
-    </div>
-
-    <!-- ACTION BUTTONS -->
-    <div class="actions">
-      <button @click="openAddForm" :disabled="isProcessing || isPageLoading">Add</button>
-      <button @click="openUpdateForm" :disabled="isProcessing || isPageLoading || !selectedRow">Update</button>
-      <button @click="openHistoryModal" :disabled="isProcessing || isPageLoading || !selectedRow">View History</button>
-      <button v-if="isAdmin" @click="openGlobalHistoryModal" :disabled="isProcessing || isPageLoading">Global Audit Log</button>
-      <button @click="openSearchForm = true" :disabled="isProcessing || isPageLoading">Search</button>
-      <button @click="clearFilter" :disabled="isProcessing || isPageLoading">Clear Filter</button>
-      <button @click="clearTableUI" :disabled="isProcessing || isPageLoading">Clear View</button>
-    </div>
-
-    <div v-if="selectedRow" class="audit-panel">
-      <h4>Selected Row Information</h4>
-      <div class="audit-grid">
-        <div><strong>Metric ID:</strong> {{ selectedRow.metric_id || '-' }}</div>
-        <div><strong>Project Code:</strong> {{ selectedRow.project_code || '-' }}</div>
-        <div><strong>Project Name:</strong> {{ selectedRow.project_name || '-' }}</div>
-        <div><strong>Project Type:</strong> {{ selectedRow.project_type || '-' }}</div>
-        <div><strong>Use Case Investment:</strong> {{ selectedRow.use_case_investment ?? '-' }}</div>
-      </div>
-    </div>
+    </div> <!-- End of PDF Export Wrapper -->
 
     <!-- Add / Update Modal -->
     <div v-if="showAddForm || showUpdateForm" class="modal-overlay">
@@ -339,7 +407,6 @@
                     <span class="badge" :class="{'badge-current': log.action_type === 'CURRENT'}">
                       {{ log.action_type === 'UPDATE' ? 'PREVIOUS' : log.action_type }}
                     </span>
-                    <!-- NEW: Revert Button -->
                     <button 
                       v-if="log.action_type !== 'CURRENT'" 
                       class="restore-btn" 
@@ -392,7 +459,6 @@
                   <span class="badge" :class="{'badge-current': props.row.action_type === 'CURRENT'}">
                     {{ props.row.action_type === 'UPDATE' ? 'PREVIOUS' : props.row.action_type }}
                   </span>
-                  <!-- NEW: Revert Button -->
                   <button 
                     v-if="props.row.action_type !== 'CURRENT'" 
                     class="restore-btn" 
@@ -488,10 +554,15 @@
 import { VueGoodTable } from 'vue-good-table-next';
 import 'vue-good-table-next/dist/vue-good-table-next.css';
 import * as XLSX from 'xlsx';
+import VueApexCharts from 'vue3-apexcharts';
+import html2pdf from 'html2pdf.js'; 
 
 export default {
   name: 'ProjectValuePage',
-  components: { VueGoodTable },
+  components: { 
+    VueGoodTable,
+    apexchart: VueApexCharts
+  },
   
   directives: {
     focus: {
@@ -503,6 +574,11 @@ export default {
 
   data() {
     return {
+      activeTab: 'grid',
+      
+      // Selected KPIs array for dynamic filtering
+      selectedKPIs: ['capacity', 'yield', 'productivity', 'quality'],
+      
       pageBanner: 'Project Value Entry',
       columns: [],
       rows: [],
@@ -522,12 +598,10 @@ export default {
       showSuccessDialog: false,
       showOverwriteModal: false,
 
-      // State for Row History Modal
       showHistoryModal: false,
       historyData: [],
       isFetchingHistory: false,
 
-      // State for Global History Modal
       showGlobalHistoryModal: false,
       globalHistoryData: [],
       isFetchingGlobalHistory: false,
@@ -569,6 +643,15 @@ export default {
   },
 
   computed: {
+    // Computed property to dynamically assign a class to the charts grid based on how many are selected
+    gridLayoutClass() {
+      const len = this.selectedKPIs.length;
+      if (len === 1) return 'grid-1';
+      if (len === 2) return 'grid-2'; // Now maps to 1 column stacked layout
+      if (len === 3) return 'grid-3';
+      return 'grid-4';
+    },
+
     apiBasePath() {
       return `${process.env.VUE_APP_API_URL}/api/project-values`;
     },
@@ -579,6 +662,300 @@ export default {
 
     isAdmin() {
       return localStorage.getItem('access_right') === 'admin';
+    },
+
+    // COMPUTED PROPERTY: Cumulative Quarterly Stacked Bar Chart with Line Overlay
+    stackedBarChartData() {
+      const projectData = {};
+      const allQuartersSet = new Set();
+
+      // Group data chronologically by Quarter AND by Project
+      this.filteredRows.forEach(row => {
+        if (!row.month_end) return;
+        
+        // Convert "DD/MM/YYYY" into a logical Quarter string like "2024 Q1"
+        const [d, m, y] = String(row.month_end).split('/');
+        if (!d || !m || !y) return;
+
+        const monthNum = parseInt(m, 10);
+        const quarterNum = Math.ceil(monthNum / 3);
+        const quarterStr = `${y} Q${quarterNum}`;
+
+        allQuartersSet.add(quarterStr);
+
+        const projName = row.project_name || 'Unknown Project';
+        if (!projectData[projName]) projectData[projName] = {};
+        if (!projectData[projName][quarterStr]) projectData[projName][quarterStr] = 0;
+
+        // Sum only the actively selected KPIs
+        let rowTotal = 0;
+        if (this.selectedKPIs.includes('capacity')) rowTotal += Number(row.capacity_improvement) || 0;
+        if (this.selectedKPIs.includes('yield')) rowTotal += Number(row.yield_savings) || 0;
+        if (this.selectedKPIs.includes('productivity')) rowTotal += Number(row.people_productivity) || 0;
+        if (this.selectedKPIs.includes('quality')) rowTotal += Number(row.quality_improvement) || 0;
+
+        projectData[projName][quarterStr] += rowTotal;
+      });
+
+      // Sort Quarters chronologically
+      const sortedQuarters = Array.from(allQuartersSet).sort((a, b) => a.localeCompare(b));
+
+      // Create a cumulative series array for every single project
+      const series = [];
+      Object.keys(projectData).forEach(projName => {
+        let runningTotal = 0;
+        const cumulativeQuarterData = sortedQuarters.map(q => {
+          const val = projectData[projName][q] || 0;
+          runningTotal += val;
+          return Number((runningTotal / 1000).toFixed(1)); 
+        });
+
+        // Add projects to the chart as BAR segments if they generated value
+        if (runningTotal > 0) {
+          series.push({ name: projName, type: 'bar', data: cumulativeQuarterData });
+        }
+      });
+
+      // NEW: Calculate the global running total for the overlay line
+      if (series.length > 0) {
+        const totalLineData = sortedQuarters.map((q, index) => {
+          let sum = 0;
+          series.forEach(s => {
+            sum += s.data[index] || 0;
+          });
+          return Number(sum.toFixed(1));
+        });
+
+        series.push({
+          name: 'Overall Trend',
+          type: 'line',
+          data: totalLineData
+        });
+      }
+
+      // NEW: Dynamically assign deep, readable colors for bars and a stark gold for the line
+      const baseColors = ['#0A2D55', '#117A65', '#6C3483', '#8B0000', '#2C3E50', '#003366', '#4B0082', '#004D40', '#800000', '#2F4F4F'];
+      const chartColors = series.map((s, index) => {
+        if (s.type === 'line') return '#FFB300'; // Stark Gold/Yellow for the line
+        return baseColors[index % baseColors.length];
+      });
+      
+      // Ensure only the line series gets a drawn line/stroke width
+      const strokeWidths = series.map(s => s.type === 'line' ? 4 : 0);
+      const markerSizes = series.map(s => s.type === 'line' ? 6 : 0);
+
+      // Return Mixed ApexCharts Configuration
+      return {
+        series: series,
+        options: {
+          chart: {
+            type: 'line', // Must be 'line' to support mixed bar/line series
+            stacked: true, 
+            fontFamily: 'inherit',
+            toolbar: { show: true },
+            zoom: { enabled: true }
+          },
+          colors: chartColors,
+          stroke: {
+            width: strokeWidths,
+            curve: 'smooth'
+          },
+          markers: {
+            size: markerSizes,
+            hover: { size: 8 }
+          },
+          plotOptions: {
+            bar: {
+              horizontal: false,
+              dataLabels: {
+                total: {
+                  enabled: true, 
+                  formatter: function(val) {
+                    return '$' + Number(val).toLocaleString('en-US') + 'k';
+                  },
+                  style: {
+                    fontSize: '13px',
+                    fontWeight: 800,
+                    color: '#1f3b64'
+                  }
+                }
+              }
+            }
+          },
+          dataLabels: {
+            enabled: false 
+          },
+          xaxis: {
+            categories: sortedQuarters,
+            title: { text: 'Quarter', style: { fontWeight: 600, fontSize: '12px', color: '#1f3b64' } }
+          },
+          yaxis: {
+            title: { text: "Cumulative Portfolio Value ($ '000)", style: { fontWeight: 600, fontSize: '12px', color: '#1f3b64' } },
+            labels: {
+              formatter: function(val) {
+                return '$' + Number(val).toLocaleString('en-US');
+              }
+            }
+          },
+          title: {
+            text: 'Overall Cumulative Value by Project',
+            align: 'left',
+            style: { fontSize: '16px', fontWeight: 600, color: '#1f3b64' }
+          },
+          tooltip: {
+            y: {
+              formatter: function(val) {
+                return "$" + Number(val).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "k";
+              }
+            }
+          },
+          legend: {
+            position: 'right',
+            offsetY: 40,
+            markers: { shape: 'circle' } // Makes legend markers neat circles
+          },
+          fill: { opacity: 1 },
+          grid: { borderColor: '#e0e6ed', strokeDashArray: 4 }
+        }
+      };
+    },
+
+    chartData() {
+      const aggregatedByMonth = {};
+
+      this.filteredRows.forEach(row => {
+        if (!row.month_end) return;
+        const month = row.month_end;
+        if (!aggregatedByMonth[month]) {
+          aggregatedByMonth[month] = { capacity: 0, yield: 0, productivity: 0, quality: 0 };
+        }
+        aggregatedByMonth[month].capacity += Number(row.capacity_improvement) || 0;
+        aggregatedByMonth[month].yield += Number(row.yield_savings) || 0;
+        aggregatedByMonth[month].productivity += Number(row.people_productivity) || 0;
+        aggregatedByMonth[month].quality += Number(row.quality_improvement) || 0;
+      });
+
+      const sortedMonths = Object.keys(aggregatedByMonth).sort((a, b) => {
+        const [d1, m1, y1] = a.split('/');
+        const [d2, m2, y2] = b.split('/');
+        return new Date(`${y1}-${m1}-${d1}`) - new Date(`${y2}-${m2}-${d2}`);
+      });
+
+      let cumCap = 0, cumYield = 0, cumProd = 0, cumQual = 0;
+      const capData = [], yieldData = [], prodData = [], qualData = [];
+
+      sortedMonths.forEach(month => {
+        cumCap += aggregatedByMonth[month].capacity;
+        cumYield += aggregatedByMonth[month].yield;
+        cumProd += aggregatedByMonth[month].productivity;
+        cumQual += aggregatedByMonth[month].quality;
+
+        capData.push((cumCap / 1000).toFixed(1));
+        yieldData.push((cumYield / 1000).toFixed(1));
+        prodData.push((cumProd / 1000).toFixed(1));
+        qualData.push((cumQual / 1000).toFixed(1));
+      });
+
+      const createOptions = (title, color, dataArray) => {
+        const firstValue = dataArray.length > 0 ? Number(dataArray[0]) : 0;
+        
+        const options = {
+          chart: {
+            type: 'line',
+            fontFamily: 'inherit',
+            toolbar: { show: true },
+            zoom: { enabled: true }
+          },
+          colors: [color],
+          stroke: { curve: 'smooth', width: 3 },
+          xaxis: {
+            categories: sortedMonths,
+            title: { text: 'Month End Date', style: { fontWeight: 600, fontSize: '12px', color: '#1f3b64' } }
+          },
+          yaxis: {
+            min: firstValue,
+            title: { text: "Cumulative Value ($ '000)", style: { fontWeight: 600, fontSize: '12px', color: '#1f3b64' } },
+            labels: {
+              formatter: function(val) {
+                return '$' + Number(val).toLocaleString('en-US');
+              }
+            }
+          },
+          markers: { size: 4, hover: { size: 7 } },
+          dataLabels: { enabled: false },
+          title: {
+            text: title,
+            align: 'left',
+            style: { fontSize: '16px', fontWeight: 600, color: '#1f3b64' }
+          },
+          tooltip: {
+            y: {
+              formatter: function(val) {
+                return "$" + Number(val).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "k";
+              }
+            }
+          },
+          grid: { 
+            borderColor: '#e0e6ed', 
+            strokeDashArray: 4,
+            padding: { top: 40, bottom: 15 }
+          }
+        };
+
+        if (sortedMonths.length > 0 && dataArray.length > 0) {
+          const lastMonth = sortedMonths[sortedMonths.length - 1];
+          const lastValue = dataArray[dataArray.length - 1];
+          
+          const formattedValue = '$' + Number(lastValue).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + 'k';
+
+          options.annotations = {
+            points: [{
+              x: lastMonth,
+              y: lastValue,
+              marker: {
+                size: 7,
+                fillColor: color,
+                strokeColor: "#fff",
+                strokeWidth: 2,
+                shape: "circle"
+              },
+              label: {
+                borderColor: color,
+                offsetY: -10,
+                style: {
+                  color: '#fff',
+                  background: color,
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  padding: { left: 6, right: 6, top: 3, bottom: 3 }
+                },
+                text: formattedValue
+              }
+            }]
+          };
+        }
+
+        return options;
+      };
+
+      return {
+        capacity: {
+          series: [{ name: 'Capacity Improvement', data: capData }],
+          options: createOptions('Capacity Improvement', '#2563EB', capData)
+        },
+        yield: {
+          series: [{ name: 'Yield Savings', data: yieldData }],
+          options: createOptions('Yield Savings', '#117A65', yieldData)
+        },
+        productivity: {
+          series: [{ name: 'People Productivity', data: prodData }],
+          options: createOptions('People Productivity', '#124076', prodData)
+        },
+        quality: {
+          series: [{ name: 'Quality Improvement', data: qualData }],
+          options: createOptions('Quality Improvement', '#6C3483', qualData)
+        }
+      };
     },
 
     globalHistoryColumns() {
@@ -625,10 +1002,10 @@ export default {
       };
 
       this.filteredRows.forEach(row => {
-        totals.capacity += Number(row.capacity_improvement) || 0;
-        totals.yield += Number(row.yield_savings) || 0;
-        totals.productivity += Number(row.people_productivity) || 0;
-        totals.quality += Number(row.quality_improvement) || 0;
+        if (this.selectedKPIs.includes('capacity')) totals.capacity += Number(row.capacity_improvement) || 0;
+        if (this.selectedKPIs.includes('yield')) totals.yield += Number(row.yield_savings) || 0;
+        if (this.selectedKPIs.includes('productivity')) totals.productivity += Number(row.people_productivity) || 0;
+        if (this.selectedKPIs.includes('quality')) totals.quality += Number(row.quality_improvement) || 0;
       });
 
       return totals;
@@ -704,8 +1081,48 @@ export default {
   },
 
   methods: {
-    // NEW: Restore function that takes the payload of the old historical record
-    // and sends it to the live PUT endpoint, effectively reverting the live data
+    async exportPDF() {
+      if (this.isProcessing || this.isPageLoading) return;
+      
+      this.isProcessing = true;
+      this.processingMessage = 'Generating single-page PDF... This may take a few seconds.';
+      
+      try {
+        const element = this.$refs.pdfExportArea;
+        
+        const dashboardWidth = element.scrollWidth;
+        const dashboardHeight = element.scrollHeight;
+        
+        const tabName = this.activeTab === 'charts' ? 'Analytics' : 'DataGrid';
+        
+        const opt = {
+          margin:       0,
+          filename:     `Project_Value_${tabName}_${new Date().toISOString().slice(0, 10)}.pdf`,
+          image:        { type: 'jpeg', quality: 1 },
+          html2canvas:  { 
+            scale: 2, 
+            useCORS: true,
+            backgroundColor: '#ffffff',
+            windowWidth: dashboardWidth,
+            width: dashboardWidth,
+            height: dashboardHeight
+          },
+          jsPDF: { 
+            unit: 'px', 
+            format: [dashboardWidth, dashboardHeight], 
+            orientation: dashboardWidth > dashboardHeight ? 'landscape' : 'portrait' 
+          } 
+        };
+        
+        await html2pdf().set(opt).from(element).save();
+      } catch (error) {
+        alert('Failed to generate PDF: ' + error.message);
+      } finally {
+        this.isProcessing = false;
+        this.processingMessage = '';
+      }
+    },
+
     async restoreHistoricalRecord(log) {
       if (this.isProcessing || log.action_type === 'CURRENT') return;
 
@@ -718,7 +1135,7 @@ export default {
       try {
         const payload = {
           project_code: log.project_code,
-          project_name: '', // The backend resolveProject will automatically map this via project_code
+          project_name: '', 
           month_end: log.month_end,
           capacity_improvement: log.capacity_improvement,
           yield_savings: log.yield_savings,
@@ -741,10 +1158,8 @@ export default {
         this.successMessage = 'Record successfully reverted!';
         this.showSuccessDialog = true;
 
-        // Fetch the fresh live table
         await this.fetchTable();
 
-        // Refresh whichever modal is actively open so the user sees the new "Current" state
         if (this.showHistoryModal) {
           this.selectedRow = this.rows.find(r => r.metric_id === log.metric_id);
           await this.openHistoryModal();
@@ -763,19 +1178,15 @@ export default {
     snapToLastDayOfMonth() {
       if (!this.activeForm.month_end) return;
 
-      // Extract the year and month the user selected
       const [year, month] = this.activeForm.month_end.split('-');
       if (!year || !month) return;
 
-      // A neat JavaScript trick: Asking for the "0th" day of the NEXT month 
-      // automatically returns the exact last day of the CURRENT month.
       const lastDay = new Date(year, month, 0);
 
       const y = lastDay.getFullYear();
       const m = String(lastDay.getMonth() + 1).padStart(2, '0');
       const d = String(lastDay.getDate()).padStart(2, '0');
 
-      // Instantly overwrite the input field with the proper last day
       this.activeForm.month_end = `${y}-${m}-${d}`;
     },
 
@@ -792,16 +1203,13 @@ export default {
         }
         const historicalRecords = await response.json();
 
-        // Format dates
         const formattedHistoricalRecords = historicalRecords.map(log => ({
           ...log,
           month_end: this.formatDisplayDate(log.month_end)
         }));
 
-        // Find only the Metric IDs that actually have a history
         const metricsWithHistory = new Set(historicalRecords.map(log => log.metric_id));
 
-        // Create Current Status objects ONLY for rows that have history
         const currentRecords = this.rows
           .filter(row => metricsWithHistory.has(row.metric_id))
           .map(row => ({
@@ -818,7 +1226,6 @@ export default {
             quality_improvement: row.quality_improvement
           }));
 
-        // Combine and Sort
         const combined = [...currentRecords, ...formattedHistoricalRecords];
         combined.sort((a, b) => {
           if (a.metric_id !== b.metric_id) {
@@ -859,7 +1266,6 @@ export default {
         }
         const historicalRecords = await response.json();
 
-        // Format the dates for the historical records
         const formattedHistoricalRecords = historicalRecords.map(log => ({
           ...log,
           month_end: this.formatDisplayDate(log.month_end)
@@ -1210,11 +1616,6 @@ export default {
       window.open('https://spotfirecbeit.mua.st.com/spotfire/wp/OpenAnalysis?file=4cfdf5f1-3884-44c5-aaf5-9380702d03d0', '_blank');
     },
 
-    goBack() {
-      if (this.isProcessing || this.isPageLoading) return;
-      this.$router.push('/landing');
-    },
-
     logout() {
       if (this.isProcessing || this.isPageLoading) return;
       localStorage.removeItem('token');
@@ -1427,6 +1828,129 @@ export default {
 </script>
 
 <style scoped>
+/* PDF Export Wrapper */
+.pdf-export-container {
+  background: white;
+  width: 100%;
+}
+
+/* Checkbox Group Styling for KPI Filters */
+.checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 0 12px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background-color: #fff;
+  height: 35px;
+  box-sizing: border-box;
+  align-items: center;
+}
+
+.checkbox-group label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+  color: #333;
+  margin: 0;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.checkbox-group input {
+  margin: 0;
+  cursor: pointer;
+}
+
+/* Dynamic CSS Grid for Charts Layout */
+.charts-grid {
+  display: grid;
+  gap: 24px;
+  margin-top: 20px;
+}
+
+.grid-1 { grid-template-columns: 1fr; }
+.grid-2 { grid-template-columns: 1fr; } /* Stack 2 KPIs directly on top of each other */
+.grid-3 { grid-template-columns: 1fr 1fr; }
+.grid-4 { grid-template-columns: 1fr 1fr; }
+
+/* In a 3-grid layout, force the 3rd chart to stretch across the entire bottom row */
+.grid-3 .chart-card:nth-child(3) {
+  grid-column: 1 / -1; 
+}
+
+.chart-card {
+  background: #ffffff;
+  border: 1px solid #e0e6ed;
+  border-radius: 12px;
+  padding: 16px 16px 0 16px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+}
+
+/* On smaller screens, completely stack the charts */
+@media (max-width: 1150px) {
+  .grid-1, .grid-2, .grid-3, .grid-4 {
+    grid-template-columns: 1fr !important;
+  }
+  .grid-3 .chart-card:nth-child(3) {
+    grid-column: auto !important;
+  }
+}
+
+/* Tabs Styling */
+.tabs-container {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+  border-bottom: 2px solid #e0e6ed;
+  padding-bottom: 12px;
+}
+
+.tab-btn {
+  background: #f8f9fb;
+  color: #1f3b64;
+  border: 1px solid #d9d9d9;
+  padding: 10px 24px;
+  font-size: 1rem;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+.tab-btn:hover {
+  background: #e7edf5;
+}
+
+.tab-btn.active {
+  background: #1f5fa8;
+  color: white;
+  border-color: #1f5fa8;
+  box-shadow: 0 4px 10px rgba(31, 95, 168, 0.3);
+}
+
+/* Charts Container */
+.charts-section {
+  background: #f8f9fb;
+  padding: 24px;
+  border-radius: 12px;
+  border: 1px solid #d9d9d9;
+}
+
+.chart-title {
+  margin: 0;
+  font-size: 1.4rem;
+  color: #1f3b64;
+}
+
+.chart-subtitle {
+  margin: 4px 0 0 0;
+  color: #666;
+  font-size: 0.95rem;
+}
+
 /* X-Large Modal for Global Audit Log */
 .x-large-modal {
   width: 95%;
@@ -1488,7 +2012,7 @@ export default {
 
 :deep(.current-row-global td) {
   border-bottom: 2px solid #28a745 !important;
-  border-top: 4px solid #c2c9d1 !important; /* This adds a dark separation line between groups */
+  border-top: 4px solid #c2c9d1 !important;
 }
 
 .badge-current {
@@ -1496,7 +2020,7 @@ export default {
   color: white;
 }
 
-/* NEW: Restore Button Styles */
+/* Restore Button Styles */
 .restore-btn {
   background-color: #f8f9fb;
   color: #1f5fa8;
@@ -1557,6 +2081,7 @@ export default {
   background: #f8f9fb;
   border: 1px solid #d9d9d9;
   border-radius: 8px;
+  flex-wrap: wrap;
 }
 
 .quick-filter-group {
@@ -1570,20 +2095,24 @@ export default {
   font-weight: 600;
   color: #1f3b64;
   font-size: 0.95rem;
+  margin: 0;
 }
 
 .quick-filter-group select {
-  padding: 8px 12px;
+  padding: 0 12px;
   border: 1px solid #ccc;
   border-radius: 4px;
   font-size: 1rem;
   background-color: white;
   cursor: pointer;
+  height: 35px;
+  box-sizing: border-box;
 }
 
+/* Dynamically scaling KPI Summary Container */
 .kpi-summary-container {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px;
   margin: 16px 0 24px 0;
 }
@@ -1625,7 +2154,6 @@ export default {
   font-weight: 800;
 }
 
-/* Vibrant, readable deep jewel tones (No Red) */
 .bg-kpi-1 { background: linear-gradient(135deg, #1E3A8A, #2563EB); } /* Cobalt Blue */
 .bg-kpi-2 { background: linear-gradient(135deg, #004D40, #117A65); } /* Deep Teal */
 .bg-kpi-3 { background: linear-gradient(135deg, #0A2D55, #124076); } /* Dark Navy */
@@ -1645,7 +2173,7 @@ export default {
 
 .home-btn,
 .logout-btn,
-.back-btn,
+.pdf-btn,
 .spotfire-btn {
   background: none;
   color: #fff;
@@ -1675,7 +2203,7 @@ export default {
 
 .home-btn:hover,
 .logout-btn:hover,
-.back-btn:hover,
+.pdf-btn:hover,
 .spotfire-btn:hover {
   background: #ffd600;
   color: #07254a;
