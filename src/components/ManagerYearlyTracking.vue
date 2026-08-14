@@ -590,10 +590,13 @@
           </div>
         </div>
 
-        <!-- 2. MILESTONE TRACKING TABLE (Middle) -->
+        <!-- 2. MILESTONE TRACKING TABLE (Middle with INLINE EDITING) -->
         <div class="chart-card">
-          <div class="chart-header">
+          <div class="chart-header" style="flex-direction: column; align-items: flex-start; gap: 8px;">
             <h3 class="chart-title">Milestone Tracking</h3>
+            <div class="inline-edit-hint" style="margin: 0; padding: 8px 12px; font-size: 0.85rem; width: 100%; box-sizing: border-box;">
+              💡 <strong>Tip:</strong> Double-click any Target or Actual date below to update it directly.
+            </div>
           </div>
           <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
             <table class="summary-table">
@@ -607,27 +610,97 @@
                   <th>Actual G2</th>
                   <th>Target G3</th>
                   <th>Actual G3</th>
+                  <th>Target Closed</th>
+                  <th>Actual Closed</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="item in filteredTimelineRows" :key="item.projectId">
                   <td><strong>{{ item.projectName }}</strong></td>
                   <td><span class="badge">{{ item.projectStatus || '-' }}</span></td>
-                  <td>{{ formatDate(item.targetG1Date) }}</td>
+                  
+                  <!-- Target G1 -->
+                  <td>
+                    <span v-if="editingCell.rowId === item.projectId && editingCell.field === 'targetG1Date'">
+                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" style="width: 130px;" />
+                    </span>
+                    <span v-else @dblclick.stop="startInlineEdit(item, 'targetG1Date', item.targetG1Date)" class="editable-cell" title="Double-click to edit">
+                      {{ formatDate(item.targetG1Date) }}
+                    </span>
+                  </td>
+
+                  <!-- Actual G1 -->
                   <td :class="getRagClass(item.actualG1Date, item.targetG1Date)">
-                    <strong>{{ item.actualG1Date ? formatDate(item.actualG1Date) : 'Pending' }}</strong>
+                    <span v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualG1Date'">
+                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" style="width: 130px;" />
+                    </span>
+                    <span v-else @dblclick.stop="startInlineEdit(item, 'actualG1Date', item.actualG1Date)" class="editable-cell" title="Double-click to edit">
+                      <strong>{{ item.actualG1Date ? formatDate(item.actualG1Date) : 'Pending' }}</strong>
+                    </span>
                   </td>
-                  <td>{{ formatDate(item.targetG2Date) }}</td>
+
+                  <!-- Target G2 -->
+                  <td>
+                    <span v-if="editingCell.rowId === item.projectId && editingCell.field === 'targetG2Date'">
+                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" style="width: 130px;" />
+                    </span>
+                    <span v-else @dblclick.stop="startInlineEdit(item, 'targetG2Date', item.targetG2Date)" class="editable-cell" title="Double-click to edit">
+                      {{ formatDate(item.targetG2Date) }}
+                    </span>
+                  </td>
+
+                  <!-- Actual G2 -->
                   <td :class="getRagClass(item.actualG2Date, item.targetG2Date)">
-                    <strong>{{ item.actualG2Date ? formatDate(item.actualG2Date) : 'Pending' }}</strong>
+                    <span v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualG2Date'">
+                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" style="width: 130px;" />
+                    </span>
+                    <span v-else @dblclick.stop="startInlineEdit(item, 'actualG2Date', item.actualG2Date)" class="editable-cell" title="Double-click to edit">
+                      <strong>{{ item.actualG2Date ? formatDate(item.actualG2Date) : 'Pending' }}</strong>
+                    </span>
                   </td>
-                  <td>{{ formatDate(item.targetG3Date) }}</td>
+
+                  <!-- Target G3 -->
+                  <td>
+                    <span v-if="editingCell.rowId === item.projectId && editingCell.field === 'targetG3Date'">
+                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" style="width: 130px;" />
+                    </span>
+                    <span v-else @dblclick.stop="startInlineEdit(item, 'targetG3Date', item.targetG3Date)" class="editable-cell" title="Double-click to edit">
+                      {{ formatDate(item.targetG3Date) }}
+                    </span>
+                  </td>
+
+                  <!-- Actual G3 -->
                   <td :class="getRagClass(item.actualG3Date, item.targetG3Date)">
-                    <strong>{{ item.actualG3Date ? formatDate(item.actualG3Date) : 'Pending' }}</strong>
+                    <span v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualG3Date'">
+                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" style="width: 130px;" />
+                    </span>
+                    <span v-else @dblclick.stop="startInlineEdit(item, 'actualG3Date', item.actualG3Date)" class="editable-cell" title="Double-click to edit">
+                      <strong>{{ item.actualG3Date ? formatDate(item.actualG3Date) : 'Pending' }}</strong>
+                    </span>
+                  </td>
+
+                  <!-- Target Closed -->
+                  <td>
+                    <span v-if="editingCell.rowId === item.projectId && editingCell.field === 'targetClosedDate'">
+                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" style="width: 130px;" />
+                    </span>
+                    <span v-else @dblclick.stop="startInlineEdit(item, 'targetClosedDate', item.targetClosedDate)" class="editable-cell" title="Double-click to edit">
+                      {{ formatDate(item.targetClosedDate) }}
+                    </span>
+                  </td>
+
+                  <!-- Actual Closed -->
+                  <td :class="getRagClass(item.actualClosedDate, item.targetClosedDate)">
+                    <span v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualClosedDate'">
+                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" style="width: 130px;" />
+                    </span>
+                    <span v-else @dblclick.stop="startInlineEdit(item, 'actualClosedDate', item.actualClosedDate)" class="editable-cell" title="Double-click to edit">
+                      <strong>{{ item.actualClosedDate ? formatDate(item.actualClosedDate) : 'Pending' }}</strong>
+                    </span>
                   </td>
                 </tr>
                 <tr v-if="filteredTimelineRows.length === 0">
-                  <td colspan="8" style="text-align: center; color: #666;">No projects found for the selected filters.</td>
+                  <td colspan="10" style="text-align: center; color: #666;">No projects found for the selected filters.</td>
                 </tr>
               </tbody>
             </table>
@@ -842,24 +915,43 @@
             </div>
           </div>
 
-          <!-- SECTION 4: PROPOSED TIMELINE TARGETS -->
-          <h4 class="section-heading">4. Proposed Timeline Targets</h4>
+          <!-- SECTION 4: TIMELINE TARGETS & ACTUALS -->
+          <h4 class="section-heading">4. Timeline Milestones (Targets & Actuals)</h4>
           <div class="form-grid">
             <div class="form-group">
               <label for="targetG1Date">Target G1 Date</label>
               <input id="targetG1Date" type="date" v-model="activeForm.targetG1Date" :disabled="isProcessing" />
             </div>
             <div class="form-group">
+              <label for="actualG1Date" style="color: #1f5fa8;">Actual G1 Date</label>
+              <input id="actualG1Date" type="date" v-model="activeForm.actualG1Date" :disabled="isProcessing" />
+            </div>
+
+            <div class="form-group">
               <label for="targetG2Date">Target G2 Date</label>
               <input id="targetG2Date" type="date" v-model="activeForm.targetG2Date" :disabled="isProcessing" />
             </div>
+            <div class="form-group">
+              <label for="actualG2Date" style="color: #1f5fa8;">Actual G2 Date</label>
+              <input id="actualG2Date" type="date" v-model="activeForm.actualG2Date" :disabled="isProcessing" />
+            </div>
+
             <div class="form-group">
               <label for="targetG3Date">Target G3 Date</label>
               <input id="targetG3Date" type="date" v-model="activeForm.targetG3Date" :disabled="isProcessing" />
             </div>
             <div class="form-group">
+              <label for="actualG3Date" style="color: #1f5fa8;">Actual G3 Date</label>
+              <input id="actualG3Date" type="date" v-model="activeForm.actualG3Date" :disabled="isProcessing" />
+            </div>
+
+            <div class="form-group">
               <label for="targetClosedDate">Target Closed Date</label>
               <input id="targetClosedDate" type="date" v-model="activeForm.targetClosedDate" :disabled="isProcessing" />
+            </div>
+            <div class="form-group">
+              <label for="actualClosedDate" style="color: #1f5fa8;">Actual Closed Date</label>
+              <input id="actualClosedDate" type="date" v-model="activeForm.actualClosedDate" :disabled="isProcessing" />
             </div>
           </div>
 
@@ -1086,7 +1178,7 @@ export default {
         selectedSite: 'ALL'
       },
 
-      // Project Timeline specific filters (Updated to only use site)
+      // Project Timeline specific filters
       timelineFilter: {
         site: 'ALL'
       },
@@ -1115,8 +1207,8 @@ export default {
 
       // Data State
       rows: [],
-      siteTargets: [], // Holds the exact expected targets from DB
-      velocityData: [], // Pipeline throughput data directly from backend
+      siteTargets: [], 
+      velocityData: [], 
       selectedRow: null,
 
       // Columns / Table refresh control
@@ -1250,17 +1342,14 @@ export default {
       };
 
       this.filteredDashboardRows.forEach(row => {
-        // Calculate the project's value over the selected tracking timeline
         let projectValue = 0;
         this.trackingYears.forEach(year => {
           projectValue += Number(row[`year${year}`]) || 0;
         });
 
-        // 1. Add to Overall metrics
         result.Overall.count += 1;
         result.Overall.value += projectValue;
 
-        // 2. Add to specific Gates based on project status
         const status = String(row.projectStatus || '').trim().toUpperCase();
         if (status === 'G1') {
           result.G1.count += 1;
@@ -1296,13 +1385,11 @@ export default {
       const labels = this.trackingYears.map(String);
       const rows = this.filteredDashboardRows;
 
-      // Base Annualized Arrays
       const actual = this.trackingYears.map(year => {
         const total = rows.reduce((sum, row) => sum + (Number(row[`year${year}`]) || 0), 0);
         return Number((total / 1000000).toFixed(1));
       });
 
-      // Calculate Expected Values directly from DB targets
       const expected = this.trackingYears.map(year => {
         let yearTargets = this.siteTargets.filter(t => t.target_year === year);
         
@@ -1314,7 +1401,6 @@ export default {
         return Number((totalExpected / 1000000).toFixed(1));
       });
 
-      // Cumulative Calculations
       let cumActualSum = 0;
       const cumulativeActual = actual.map(val => {
         cumActualSum += val;
@@ -1327,24 +1413,13 @@ export default {
         return Number(cumExpectedSum.toFixed(1));
       });
 
-      return {
-        labels,
-        actual,
-        expected,
-        cumulativeActual,
-        cumulativeExpected
-      };
+      return { labels, actual, expected, cumulativeActual, cumulativeExpected };
     },
     
-    // Options and Series for CHART 1: Cumulative AI Values
     cumulativeTrendOptions() {
       return {
-        chart: {
-          fontFamily: 'Arial, sans-serif',
-          toolbar: { show: false },
-          animations: { enabled: false }
-        },
-        colors: ['#05204a', '#037d50'], // Blue for Actual, Green for Expected
+        chart: { fontFamily: 'Arial, sans-serif', toolbar: { show: false }, animations: { enabled: false } },
+        colors: ['#05204a', '#037d50'], 
         xaxis: {
           categories: this.siteTrendData.labels,
           title: { text: 'Year' },
@@ -1357,16 +1432,8 @@ export default {
             style: { fontSize: '13px', fontWeight: 600 }
           }
         },
-        stroke: {
-          width: [0, 4],
-          curve: 'smooth'
-        },
-        plotOptions: {
-          bar: {
-            columnWidth: '45%',
-            borderRadius: 4
-          }
-        },
+        stroke: { width: [0, 4], curve: 'smooth' },
+        plotOptions: { bar: { columnWidth: '45%', borderRadius: 4 } },
         dataLabels: { enabled: false },
         legend: { position: 'top' },
         tooltip: {
@@ -1384,15 +1451,10 @@ export default {
       ];
     },
 
-    // Options and Series for CHART 2: Annualized AI Values
     annualizedTrendOptions() {
       return {
-        chart: {
-          fontFamily: 'Arial, sans-serif',
-          toolbar: { show: false },
-          animations: { enabled: false }
-        },
-        colors: ['#05204a', '#037d50'], // Teal for Actual, Green for Expected
+        chart: { fontFamily: 'Arial, sans-serif', toolbar: { show: false }, animations: { enabled: false } },
+        colors: ['#05204a', '#037d50'], 
         xaxis: {
           categories: this.siteTrendData.labels,
           title: { text: 'Year' },
@@ -1405,16 +1467,8 @@ export default {
             style: { fontSize: '13px', fontWeight: 600 }
           }
         },
-        stroke: {
-          width: [0, 4],
-          curve: 'smooth'
-        },
-        plotOptions: {
-          bar: {
-            columnWidth: '45%',
-            borderRadius: 4
-          }
-        },
+        stroke: { width: [0, 4], curve: 'smooth' },
+        plotOptions: { bar: { columnWidth: '45%', borderRadius: 4 } },
         dataLabels: { enabled: false },
         legend: { position: 'top' },
         tooltip: {
@@ -1446,7 +1500,6 @@ export default {
         
         map[pillar].count += 1;
         
-        // Sum timeline values across the currently visible tracking years
         let projectValue = 0;
         this.trackingYears.forEach(year => {
           projectValue += Number(row[`year${year}`]) || 0;
@@ -1457,24 +1510,20 @@ export default {
 
       return Object.entries(map)
         .map(([pillar, data]) => ({ pillar, ...data }))
-        .sort((a, b) => b.value - a.value); // Sort highest value first
+        .sort((a, b) => b.value - a.value); 
     },
 
     yearlySummaryData() {
-      // Requirement: Years N to N+2
       const displayYears = [this.currentYear, this.currentYear + 1, this.currentYear + 2];
       
       return displayYears.map(displayYear => {
         let cumulativeActual = 0;
         let cumulativeTarget = 0;
 
-        // Loop through the visible timeline up to the current display year to build the running total
         this.trackingYears.forEach(year => {
           if (year <= displayYear) {
-            // Add Actuals for this year based on FILTERED rows
             cumulativeActual += this.filteredDashboardRows.reduce((sum, row) => sum + (Number(row[`year${year}`]) || 0), 0);
             
-            // Add Targets for this year based on FILTERED site
             let yearTargets = this.siteTargets.filter(t => t.target_year === year);
             if (this.dashboardFilter.selectedSite !== 'ALL') {
               yearTargets = yearTargets.filter(t => t.site === this.dashboardFilter.selectedSite);
@@ -1483,11 +1532,7 @@ export default {
           }
         });
 
-        return {
-          year: displayYear,
-          actual: cumulativeActual,
-          target: cumulativeTarget
-        };
+        return { year: displayYear, actual: cumulativeActual, target: cumulativeTarget };
       });
     },
 
@@ -1503,30 +1548,24 @@ export default {
 
     ganttChartHeight() {
       const projectCount = this.filteredTimelineRows.length;
-      const baseHeight = 100; // Reduced base padding
-      const dynamicHeight = baseHeight + (projectCount * 28); // Slightly thinner bars
-      
-      // Caps the chart at 350px so it always stays compact
+      const baseHeight = 100; 
+      const dynamicHeight = baseHeight + (projectCount * 28); 
       return projectCount === 0 ? 150 : Math.min(dynamicHeight, 450); 
     },
 
     ganttChartSeries() {
       const g1Solid = []; const g2Solid = []; const g3Solid = [];
       const g1Past = [];  const g2Past = [];  const g3Past = [];
-      const now = new Date().getTime(); // Grabs today's exact date
+      const now = new Date().getTime(); 
 
-      // Helper function to dynamically split the bars if they cross "Today"
       const processPhase = (projName, start, end, solidArr, pastArr) => {
         if (!start || !end || start >= end) return;
         
         if (end <= now) {
-          // Entirely in the past -> Make it striped
           pastArr.push({ x: projName, y: [start, end] });
         } else if (start >= now) {
-          // Entirely in the future -> Keep it solid
           solidArr.push({ x: projName, y: [start, end] });
         } else {
-          // Crosses today -> Split the bar exactly at the red line!
           pastArr.push({ x: projName, y: [start, now] });
           solidArr.push({ x: projName, y: [now, end] });
         }
@@ -1543,7 +1582,6 @@ export default {
         processPhase(row.projectName, tG3, tClosed, g3Solid, g3Past);
       });
 
-      // Output exactly 6 series (3 for Future, 3 for Past)
       return [
         { name: 'G1 (Active/Future)', data: g1Solid },
         { name: 'G2 (Active/Future)', data: g2Solid },
@@ -1572,8 +1610,8 @@ export default {
               borderColor: '#000000',
               position: 'bottom',
               textAnchor: 'middle',
-              orientation: 'horizontal', // <-- This centers the flag exactly on the line
-              offsetX: 0,           // <-- Ensures no weird default shifting
+              orientation: 'horizontal', 
+              offsetX: 0,           
               offsetY: -6,          
               style: { color: '#fff', background: '#000000', fontWeight: 600, fontSize: '11px' },
               text: 'Today'
@@ -1582,40 +1620,21 @@ export default {
         ]
       },
         plotOptions: {
-          bar: {
-            horizontal: true,
-            barHeight: '60%',
-            rangeBarGroupRows: true 
-          }
+          bar: { horizontal: true, barHeight: '60%', rangeBarGroupRows: true }
         },
-        // 3 bold colors for Future/Active, 3 soft/pastel colors for the Past
         colors: [
-          '#124076', '#6C3483', '#4F46E5', // Navy, Amethyst, Indigo (Future)
-          '#a3b8d7', '#c9a1d6', '#a9a4f8'  // Soft Navy, Soft Amethyst, Soft Indigo (Past)
+          '#124076', '#6C3483', '#4F46E5', 
+          '#a3b8d7', '#c9a1d6', '#a9a4f8'  
         ],
-        fill: {
-          type: 'solid',
-          opacity: 1
-        },
+        fill: { type: 'solid', opacity: 1 },
         xaxis: {
           type: 'datetime',
-          position: 'bottom', // Moves the dates back to the bottom
-          labels: { 
-            format: 'MMM yyyy',
-            datetimeUTC: false,
-            style: { fontSize: '12px' } 
-          }
+          position: 'bottom', 
+          labels: { format: 'MMM yyyy', datetimeUTC: false, style: { fontSize: '12px' } }
         },
-        yaxis: {
-          labels: { style: { fontSize: '13px', fontWeight: 600 } }
-        },
-        legend: {
-          position: 'top',
-          horizontalAlign: 'left'
-        },
-        tooltip: {
-          x: { format: 'dd MMM yyyy' }
-        },
+        yaxis: { labels: { style: { fontSize: '13px', fontWeight: 600 } } },
+        legend: { position: 'top', horizontalAlign: 'left' },
+        tooltip: { x: { format: 'dd MMM yyyy' } },
         noData: { text: 'No timeline data available for selected filters.' }
       };
     },
@@ -1623,49 +1642,23 @@ export default {
     // ==========================================
     // STATIC PIE CHARTS (Filtered)
     // ==========================================
-    dtitPieData() {
-      return this.buildCountPieData('dtitInvolved');
-    },
-    foakPieData() {
-      return this.buildCountPieData('foakNoak');
-    },
+    dtitPieData() { return this.buildCountPieData('dtitInvolved'); },
+    foakPieData() { return this.buildCountPieData('foakNoak'); },
     pillarPieData() {
-      // Pull directly from your summary table data which already calculates the total values and applies filtering
       const summary = this.pillarSummaryData;
-      return {
-        labels: summary.map(item => item.pillar),
-        values: summary.map(item => item.value)
-      };
+      return { labels: summary.map(item => item.pillar), values: summary.map(item => item.value) };
     },
-    kpiPieData() {
-      return this.buildKpiPieData();
-    },
+    kpiPieData() { return this.buildKpiPieData(); },
 
-    dtitPieOptions() {
-      return this.buildPieOptions('DTIT Involved', this.dtitPieData.labels);
-    },
-    foakPieOptions() {
-      return this.buildPieOptions('FOAK / NOAK', this.foakPieData.labels);
-    },
-    pillarPieOptions() {
-      return this.buildPieOptions('Pillars', this.pillarPieData.labels);
-    },
-    kpiPieOptions() {
-      return this.buildPieOptions('KPI Breakdown', this.kpiPieData.labels);
-    },
+    dtitPieOptions() { return this.buildPieOptions('DTIT Involved', this.dtitPieData.labels); },
+    foakPieOptions() { return this.buildPieOptions('FOAK / NOAK', this.foakPieData.labels); },
+    pillarPieOptions() { return this.buildPieOptions('Pillars', this.pillarPieData.labels); },
+    kpiPieOptions() { return this.buildPieOptions('KPI Breakdown', this.kpiPieData.labels); },
 
-    dtitPieSeries() {
-      return this.dtitPieData.values;
-    },
-    foakPieSeries() {
-      return this.foakPieData.values;
-    },
-    pillarPieSeries() {
-      return this.pillarPieData.values;
-    },
-    kpiPieSeries() {
-      return this.kpiPieData.values;
-    }
+    dtitPieSeries() { return this.dtitPieData.values; },
+    foakPieSeries() { return this.foakPieData.values; },
+    pillarPieSeries() { return this.pillarPieData.values; },
+    kpiPieSeries() { return this.kpiPieData.values; }
   },
   created() {
     this.rebuildTableColumns();
@@ -1700,10 +1693,7 @@ export default {
       this.processingMessage = 'Generating single-page PDF... This may take a few seconds.';
 
       try {
-        // Target the active visual tab safely
         const element = document.querySelector('.analytics-section');
-        
-        // Grab the exact real-time dimensions of your dashboard
         const dashboardWidth = element.scrollWidth;
         const dashboardHeight = element.scrollHeight;
         
@@ -1810,30 +1800,21 @@ export default {
     // STATIC PIE CHART HELPERS
     // -------------------------------------------------
     normalizePieLabel(value) {
-      if (value === null || value === undefined || String(value).trim() === '') {
-        return 'Unassigned';
-      }
+      if (value === null || value === undefined || String(value).trim() === '') return 'Unassigned';
       return String(value).trim();
     },
 
     buildCountPieData(field) {
       const map = {};
-
       this.filteredDashboardRows.forEach(row => {
         const key = this.normalizePieLabel(row[field]);
         map[key] = (map[key] || 0) + 1;
       });
-
       const sortedEntries = Object.entries(map).sort((a, b) => b[1] - a[1]);
-
-      return {
-        labels: sortedEntries.map(([label]) => label),
-        values: sortedEntries.map(([, value]) => value)
-      };
+      return { labels: sortedEntries.map(([label]) => label), values: sortedEntries.map(([, value]) => value) };
     },
 
     buildKpiPieData() {
-      // Ensure we ONLY pull financial value metrics so the pie chart proportions make mathematical sense
       const metrics = [
         { label: 'Capacity Gain ($)', field: 'capacityGainValue' },
         { label: 'DL Value ($)', field: 'dlValue' },
@@ -1854,12 +1835,7 @@ export default {
       const isFinancial = title === 'KPI Breakdown' || title === 'Pillars';
 
       return {
-        chart: {
-          type: 'pie',
-          fontFamily: 'Arial, sans-serif',
-          toolbar: { show: false },
-          animations: { enabled: false }
-        },
+        chart: { type: 'pie', fontFamily: 'Arial, sans-serif', toolbar: { show: false }, animations: { enabled: false } },
         labels,
         colors: this.pieColors,
         legend: {
@@ -1868,16 +1844,8 @@ export default {
           horizontalAlign: 'center',
           fontSize: '12px',
           fontWeight: 500,
-          markers: {
-            width: 10,
-            height: 10,
-            radius: 10,
-            offsetX: -2,
-          },
-          itemMargin: {
-            horizontal: 8,
-            vertical: 2
-          },
+          markers: { width: 10, height: 10, radius: 10, offsetX: -2 },
+          itemMargin: { horizontal: 8, vertical: 2 },
           formatter: (seriesName, opts) => {
             const val = opts.w.globals.seriesTotals[opts.seriesIndex];
             const total = opts.w.globals.seriesTotals.reduce((a, b) => a + b, 0);
@@ -1889,22 +1857,14 @@ export default {
             }
             return `${seriesName}: ${val} (${percent}%)`;
           },
-          onItemClick: {
-            toggleDataSeries: false
-          },
-          onItemHover: {
-            highlightDataSeries: false
-          }
+          onItemClick: { toggleDataSeries: false },
+          onItemHover: { highlightDataSeries: false }
         },
-        // Turn off internal slice labels so they are only displayed outside via the Legend
-        dataLabels: {
-          enabled: false
-        },
+        dataLabels: { enabled: false },
         tooltip: {
           enabled: true,
           y: {
             formatter: (val, opts) => {
-              // Safely calculate percentage
               const seriesArr = opts.series || [];
               const total = seriesArr.reduce((a, b) => a + b, 0);
               const percent = total > 0 ? ((val / total) * 100).toFixed(1) : '0.0';
@@ -1917,30 +1877,10 @@ export default {
             }
           }
         },
-        stroke: {
-          width: 1,
-          colors: ['#ffffff']
-        },
-        plotOptions: {
-          pie: {
-            expandOnClick: false
-          }
-        },
-        states: {
-          hover: {
-            filter: {
-              type: 'none'
-            }
-          },
-          active: {
-            filter: {
-              type: 'none'
-            }
-          }
-        },
-        noData: {
-          text: `No data for ${title}`
-        }
+        stroke: { width: 1, colors: ['#ffffff'] },
+        plotOptions: { pie: { expandOnClick: false } },
+        states: { hover: { filter: { type: 'none' } }, active: { filter: { type: 'none' } } },
+        noData: { text: `No data for ${title}` }
       };
     },
 
@@ -1981,15 +1921,12 @@ export default {
         const targetsData = await targetsRes.json();
         const velocityData = await velocityRes.json();
         
-        // Ensure projectStatus maps correctly from backend project_status
         this.rows = data.map(row => ({
           ...row,
           projectStatus: row.projectStatus || row.project_status
         }));
         
-        // Save the raw targets lookup table into Vue state
         this.siteTargets = targetsData;
-        // Save the new real pipeline velocity data from the backend
         this.velocityData = velocityData;
 
       } catch (err) {
@@ -2061,9 +1998,13 @@ export default {
     timelineColumnDefs() {
       return [
         { label: 'Target G1 Date', field: 'targetG1Date', type: 'text', formatType: 'date', width: '130px', hidden: true },
+        { label: 'Actual G1 Date', field: 'actualG1Date', type: 'text', formatType: 'date', width: '130px', hidden: true },
         { label: 'Target G2 Date', field: 'targetG2Date', type: 'text', formatType: 'date', width: '130px', hidden: true },
+        { label: 'Actual G2 Date', field: 'actualG2Date', type: 'text', formatType: 'date', width: '130px', hidden: true },
         { label: 'Target G3 Date', field: 'targetG3Date', type: 'text', formatType: 'date', width: '130px', hidden: true },
-        { label: 'Target Closed Date', field: 'targetClosedDate', type: 'text', formatType: 'date', width: '150px', hidden: true }
+        { label: 'Actual G3 Date', field: 'actualG3Date', type: 'text', formatType: 'date', width: '130px', hidden: true },
+        { label: 'Target Closed Date', field: 'targetClosedDate', type: 'text', formatType: 'date', width: '150px', hidden: true },
+        { label: 'Actual Closed Date', field: 'actualClosedDate', type: 'text', formatType: 'date', width: '150px', hidden: true }
       ];
     },
 
@@ -2125,9 +2066,13 @@ export default {
         'projectStatus',
         'currentPmoGate',
         'targetG1Date',
+        'actualG1Date',
         'targetG2Date',
+        'actualG2Date',
         'targetG3Date',
-        'targetClosedDate'
+        'actualG3Date',
+        'targetClosedDate',
+        'actualClosedDate'
       ]);
 
       this.hiddenColumns = {};
@@ -2192,7 +2137,6 @@ export default {
       if (!actual || !target) return 'pending-cell';
       const actualDate = new Date(actual);
       const targetDate = new Date(target);
-      // If actual is greater than target, it's late (Red). Otherwise, on-time/early (Green).
       return actualDate > targetDate ? 'rag-red' : 'rag-green';
     },
 
@@ -2384,7 +2328,7 @@ export default {
       this.editingCell = { rowId: row.projectId, field };
       
       // Standardize date fields for the input calendar UI if it's a date field
-      if (['targetG1Date', 'targetG2Date', 'targetG3Date', 'targetClosedDate'].includes(field)) {
+      if (['targetG1Date', 'targetG2Date', 'targetG3Date', 'targetClosedDate', 'actualG1Date', 'actualG2Date', 'actualG3Date', 'actualClosedDate'].includes(field)) {
         this.editValue = currentValue ? String(currentValue).slice(0, 10) : '';
       } else {
         this.editValue = currentValue;
@@ -2411,9 +2355,13 @@ export default {
         'foakNoak',
         'comment',
         'targetG1Date',
+        'actualG1Date',
         'targetG2Date',
+        'actualG2Date',
         'targetG3Date',
-        'targetClosedDate'
+        'actualG3Date',
+        'targetClosedDate',
+        'actualClosedDate'
       ];
 
       if (!stringFields.includes(field)) {
@@ -2448,7 +2396,7 @@ export default {
         projectStatus: '',
         pillars: '',
         sites: '', 
-        sitesArray: [], // Used strictly for multi-checkbox UI
+        sitesArray: [], 
         currentPmoGate: '',
         dtitInvolved: '',
         aiAaAType: '',
@@ -2465,9 +2413,13 @@ export default {
         qualityValue: null,
         qualityCases: null,
         targetG1Date: null,
+        actualG1Date: null,
         targetG2Date: null,
+        actualG2Date: null,
         targetG3Date: null,
-        targetClosedDate: null
+        actualG3Date: null,
+        targetClosedDate: null,
+        actualClosedDate: null
       };
 
       this.trackingYears.forEach(year => {
@@ -2486,16 +2438,21 @@ export default {
 
       this.updateForm = this.buildTimelineForm({ ...this.selectedRow }, false);
       
-      // Load sites into checkbox array safely with String cast
       this.updateForm.sitesArray = this.selectedRow.sites 
         ? String(this.selectedRow.sites).split(',').map(s => s.trim()) 
         : [];
 
-      // Ensure target dates fit the HTML date input perfectly (YYYY-MM-DD)
       this.updateForm.targetG1Date = this.selectedRow.targetG1Date ? String(this.selectedRow.targetG1Date).slice(0, 10) : null;
+      this.updateForm.actualG1Date = this.selectedRow.actualG1Date ? String(this.selectedRow.actualG1Date).slice(0, 10) : null;
+      
       this.updateForm.targetG2Date = this.selectedRow.targetG2Date ? String(this.selectedRow.targetG2Date).slice(0, 10) : null;
+      this.updateForm.actualG2Date = this.selectedRow.actualG2Date ? String(this.selectedRow.actualG2Date).slice(0, 10) : null;
+      
       this.updateForm.targetG3Date = this.selectedRow.targetG3Date ? String(this.selectedRow.targetG3Date).slice(0, 10) : null;
+      this.updateForm.actualG3Date = this.selectedRow.actualG3Date ? String(this.selectedRow.actualG3Date).slice(0, 10) : null;
+      
       this.updateForm.targetClosedDate = this.selectedRow.targetClosedDate ? String(this.selectedRow.targetClosedDate).slice(0, 10) : null;
+      this.updateForm.actualClosedDate = this.selectedRow.actualClosedDate ? String(this.selectedRow.actualClosedDate).slice(0, 10) : null;
 
       this.showUpdateForm = true;
       this.showAddForm = false;
@@ -2508,7 +2465,6 @@ export default {
       this.isProcessing = true;
       this.processingMessage = 'Creating Project Metadata...';
       
-      // Combine checked array into string for DB safely
       this.addForm.sites = Array.isArray(this.addForm.sitesArray) ? this.addForm.sitesArray.join(', ') : '';
 
       try {
@@ -2544,7 +2500,6 @@ export default {
       this.isProcessing = true;
       this.processingMessage = 'Updating Project Data...';
       
-      // Combine checked array into string for DB safely
       this.updateForm.sites = Array.isArray(this.updateForm.sitesArray) ? this.updateForm.sitesArray.join(', ') : '';
 
       try {
