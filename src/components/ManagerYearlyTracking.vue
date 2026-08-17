@@ -210,7 +210,7 @@
 
               <span v-else>
                 <!-- Editing Mode -->
-                <span v-if="editingCell.rowId === props.row.projectId && editingCell.field === props.column.field">
+                <div v-if="editingCell.rowId === props.row.projectId && editingCell.field === props.column.field" style="width: 100%;">
                   <input
                     v-if="props.column.formatType === 'date'"
                     type="date"
@@ -220,7 +220,6 @@
                     @keyup.esc="cancelInlineEdit"
                     v-focus
                     class="inline-input"
-                    style="width: 100%; min-width: 140px;"
                   />
                   <input
                     v-else-if="props.column.type === 'text'"
@@ -231,7 +230,6 @@
                     @keyup.esc="cancelInlineEdit"
                     v-focus
                     class="inline-input"
-                    style="width: 100%; min-width: 150px;"
                   />
                   <input
                     v-else
@@ -243,12 +241,11 @@
                     @keyup.esc="cancelInlineEdit"
                     v-focus
                     class="inline-input"
-                    style="width: 100%; min-width: 80px;"
                   />
-                </span>
+                </div>
 
                 <!-- Viewing Mode -->
-                <span
+                <div
                   v-else
                   @dblclick.stop="startInlineEdit(props.row, props.column.field, props.row[props.column.field])"
                   class="editable-cell"
@@ -266,7 +263,7 @@
                   <template v-else>
                     {{ props.row[props.column.field] ?? '-' }}
                   </template>
-                </span>
+                </div>
               </span>
             </template>
 
@@ -621,82 +618,82 @@
                   
                   <!-- Target G1 -->
                   <td>
-                    <span v-if="editingCell.rowId === item.projectId && editingCell.field === 'targetG1Date'">
-                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" style="width: 130px;" />
-                    </span>
-                    <span v-else @dblclick.stop="startInlineEdit(item, 'targetG1Date', item.targetG1Date)" class="editable-cell" title="Double-click to edit">
+                    <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'targetG1Date'">
+                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
+                    </div>
+                    <div v-else @dblclick.stop="startInlineEdit(item, 'targetG1Date', item.targetG1Date)" class="editable-cell" title="Double-click to edit">
                       {{ formatDate(item.targetG1Date) }}
-                    </span>
+                    </div>
                   </td>
 
                   <!-- Actual G1 -->
                   <td :class="getRagClass(item.actualG1Date, item.targetG1Date)">
-                    <span v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualG1Date'">
-                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" style="width: 130px;" />
-                    </span>
-                    <span v-else @dblclick.stop="startInlineEdit(item, 'actualG1Date', item.actualG1Date)" class="editable-cell" title="Double-click to edit">
+                    <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualG1Date'">
+                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
+                    </div>
+                    <div v-else @dblclick.stop="startInlineEdit(item, 'actualG1Date', item.actualG1Date)" class="editable-cell" title="Double-click to edit">
                       <strong>{{ item.actualG1Date ? formatDate(item.actualG1Date) : 'Pending' }}</strong>
-                    </span>
+                    </div>
                   </td>
 
                   <!-- Target G2 -->
                   <td>
-                    <span v-if="editingCell.rowId === item.projectId && editingCell.field === 'targetG2Date'">
-                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" style="width: 130px;" />
-                    </span>
-                    <span v-else @dblclick.stop="startInlineEdit(item, 'targetG2Date', item.targetG2Date)" class="editable-cell" title="Double-click to edit">
+                    <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'targetG2Date'">
+                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
+                    </div>
+                    <div v-else @dblclick.stop="startInlineEdit(item, 'targetG2Date', item.targetG2Date)" class="editable-cell" title="Double-click to edit">
                       {{ formatDate(item.targetG2Date) }}
-                    </span>
+                    </div>
                   </td>
 
                   <!-- Actual G2 -->
                   <td :class="getRagClass(item.actualG2Date, item.targetG2Date)">
-                    <span v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualG2Date'">
-                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" style="width: 130px;" />
-                    </span>
-                    <span v-else @dblclick.stop="startInlineEdit(item, 'actualG2Date', item.actualG2Date)" class="editable-cell" title="Double-click to edit">
+                    <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualG2Date'">
+                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
+                    </div>
+                    <div v-else @dblclick.stop="startInlineEdit(item, 'actualG2Date', item.actualG2Date)" class="editable-cell" title="Double-click to edit">
                       <strong>{{ item.actualG2Date ? formatDate(item.actualG2Date) : 'Pending' }}</strong>
-                    </span>
+                    </div>
                   </td>
 
                   <!-- Target G3 -->
                   <td>
-                    <span v-if="editingCell.rowId === item.projectId && editingCell.field === 'targetG3Date'">
-                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" style="width: 130px;" />
-                    </span>
-                    <span v-else @dblclick.stop="startInlineEdit(item, 'targetG3Date', item.targetG3Date)" class="editable-cell" title="Double-click to edit">
+                    <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'targetG3Date'">
+                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
+                    </div>
+                    <div v-else @dblclick.stop="startInlineEdit(item, 'targetG3Date', item.targetG3Date)" class="editable-cell" title="Double-click to edit">
                       {{ formatDate(item.targetG3Date) }}
-                    </span>
+                    </div>
                   </td>
 
                   <!-- Actual G3 -->
                   <td :class="getRagClass(item.actualG3Date, item.targetG3Date)">
-                    <span v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualG3Date'">
-                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" style="width: 130px;" />
-                    </span>
-                    <span v-else @dblclick.stop="startInlineEdit(item, 'actualG3Date', item.actualG3Date)" class="editable-cell" title="Double-click to edit">
+                    <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualG3Date'">
+                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
+                    </div>
+                    <div v-else @dblclick.stop="startInlineEdit(item, 'actualG3Date', item.actualG3Date)" class="editable-cell" title="Double-click to edit">
                       <strong>{{ item.actualG3Date ? formatDate(item.actualG3Date) : 'Pending' }}</strong>
-                    </span>
+                    </div>
                   </td>
 
                   <!-- Target Closed -->
                   <td>
-                    <span v-if="editingCell.rowId === item.projectId && editingCell.field === 'targetClosedDate'">
-                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" style="width: 130px;" />
-                    </span>
-                    <span v-else @dblclick.stop="startInlineEdit(item, 'targetClosedDate', item.targetClosedDate)" class="editable-cell" title="Double-click to edit">
+                    <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'targetClosedDate'">
+                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
+                    </div>
+                    <div v-else @dblclick.stop="startInlineEdit(item, 'targetClosedDate', item.targetClosedDate)" class="editable-cell" title="Double-click to edit">
                       {{ formatDate(item.targetClosedDate) }}
-                    </span>
+                    </div>
                   </td>
 
                   <!-- Actual Closed -->
                   <td :class="getRagClass(item.actualClosedDate, item.targetClosedDate)">
-                    <span v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualClosedDate'">
-                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" style="width: 130px;" />
-                    </span>
-                    <span v-else @dblclick.stop="startInlineEdit(item, 'actualClosedDate', item.actualClosedDate)" class="editable-cell" title="Double-click to edit">
+                    <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualClosedDate'">
+                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
+                    </div>
+                    <div v-else @dblclick.stop="startInlineEdit(item, 'actualClosedDate', item.actualClosedDate)" class="editable-cell" title="Double-click to edit">
                       <strong>{{ item.actualClosedDate ? formatDate(item.actualClosedDate) : 'Pending' }}</strong>
-                    </span>
+                    </div>
                   </td>
                 </tr>
                 <tr v-if="filteredTimelineRows.length === 0">
@@ -3248,6 +3245,11 @@ export default {
   background: white;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
+
+/* ========================================================== */
+/* NEW: CSS for expanding Inline Editable Cells completely    */
+/* ========================================================== */
+
 .inline-edit-hint {
   background-color: #e7edf5;
   color: #1f5fa8;
@@ -3257,24 +3259,39 @@ export default {
   font-size: 0.95rem;
   border: 1px solid #c2d5ee;
 }
+
 .editable-cell {
   cursor: pointer;
-  border-bottom: 1px dashed transparent;
-  transition: border-color 0.2s, background-color 0.2s;
-  display: inline-block;
+  border: 1px dashed transparent;
+  border-radius: 4px;
+  transition: all 0.2s ease-in-out;
+  display: flex;            /* Makes the hit box block-level */
+  align-items: center;      /* Keeps the text vertically centered */
+  width: 100%;              /* Forces the hit box to stretch */
   min-width: 50px;
-  min-height: 20px;
+  min-height: 30px;         /* Expands the physical clickable height */
+  padding: 2px 6px;         /* Adds a comfortable padding inside the box */
+  box-sizing: border-box;
 }
+
 .editable-cell:hover {
-  border-bottom: 1px dashed #1f5fa8;
+  border-color: #1f5fa8;
   background-color: #f0f4f8;
 }
+
 .inline-input {
-  padding: 6px;
-  border: 1px solid #1f5fa8;
+  display: block;
+  width: 100% !important;   /* Forces the input to overwrite everything and stretch */
+  min-height: 32px;
+  padding: 6px 8px;         /* Thicker padding for a better input experience */
+  border: 2px solid #1f5fa8; /* Visually pops when active */
   border-radius: 4px;
   outline: none;
   font-family: inherit;
+  font-size: inherit;
+  box-sizing: border-box;
+  background-color: #fff;
+  box-shadow: 0 0 5px rgba(31, 95, 168, 0.2);
 }
 
 /* Vue Good Table Overrides */
