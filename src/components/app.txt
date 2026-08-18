@@ -1,0 +1,189 @@
+import os
+from flask import Flask, request, jsonify, send_from_directory
+from datetime import datetime
+# You will need to pip install pymysql or mysql-connector-python
+import pymysql 
+
+app = Flask(__name__, static_folder="dist")
+
+# ==========================================
+# 1. DATABASE CONNECTION & HELPER FUNCTIONS
+# ==========================================
+# (You will define your bem_query function, authenticate_token, 
+# and parse_standard_date helpers here, translating them from server.js)
+import os
+import jwt
+import pymysql
+import pandas as pd
+from functools import wraps
+from datetime import datetime, timedelta
+from flask import Flask, request, jsonify, send_from_directory
+from ldap3 import Server, Connection, ALL, SUBTREE
+
+app = Flask(__name__, static_folder="dist")
+
+# =====================================
+# CONFIGURATION & ENV VARIABLES
+# =====================================
+JWT_SECRET = os.environ.get("JWT_SECRET", "fallback_secret_for_local_dev")
+LDAP_URL = os.environ.get("LDAP_URL")
+BASE_DN = os.environ.get("LDAP_BASE_DN")
+
+PROJECT_MASTER_TABLE = os.environ.get("PROJECT_MASTER_TABLE", "t_project_master")
+PROJECT_VALUES_TABLE = os.environ.get("PROJECT_VALUES_TABLE", "t_project_values")
+ACCESS_TABLE = os.environ.get("ACCESS_TABLE", "t_project_access")
+HISTORY_TABLE = "t_project_values_history"
+MASTER_HISTORY_TABLE = "t_project_master_history"
+
+# BEM Database Tables
+MANAGER_PROJECTS_TABLE = "t_manager_project_master"
+MANAGER_YEARLY_TABLE = "t_manager_yearly_savings"
+MANAGER_METRICS_TABLE = "t_manager_metrics"
+MANAGER_COMMENTS_TABLE = "t_manager_comments"
+MANAGER_HISTORY_TABLE = "t_manager_history"
+MANAGER_SITE_TARGETS_TABLE = "t_manager_site_targets"
+MANAGER_PHASES_TABLE = "t_manager_project_phases"
+
+# =====================================
+# DATABASE HELPERS (Replacing mysql2 pool)
+# =====================================
+def get_db_connection(is_bem=False):
+    """Creates a fresh connection per request, mimicking connection pooling."""
+    return pymysql.connect(
+        host=os.environ.get("DB_HOST"),
+        user=os.environ.get("BEM_DB_USER") if is_bem else os.environ.get("DB_USER"),
+        password=os.environ.get("BEM_DB_PASSWORD") if is_bem else os.environ.get("DB_PASSWORD"),
+        database=os.environ.get("BEM_DB_NAME") if is_bem else os.environ.get("DB_NAME"),
+        port=int(os.environ.get("DB_PORT", 3306)),
+        cursorclass=pymysql.cursors.DictCursor # Returns rows as dictionaries (JSON objects)
+    )
+
+def query_promise(sql, params=None, is_bem=False):
+    """Translates your Node queryPromise / bemQueryPromise into Python."""
+    connection = get_db_connection(is_bem)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(sql, params or ())
+            if sql.strip().upper().startswith("SELECT"):
+                return cursor.fetchall()
+            connection.commit()
+            return {"affectedRows": cursor.rowcount, "insertId": cursor.lastrowid}
+    finally:
+        connection.close()
+
+def bem_query_promise(sql, params=None):
+    return query_promise(sql, params, is_bem=True)
+
+# =====================================
+# DATA NORMALIZATION HELPERS
+# =====================================
+def normalize_text(value):
+    if value is None or str(value).strip() == "":
+        return None
+    return str(value).strip()
+
+def normalize_number(value):
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+def parse_standard_date(value):
+    if not value:
+        return None
+    # Handle standard YYYY-MM-DD string slice
+    try:
+        date_str = str(value).strip()[:10]
+        parsed_date = pd.to_datetime(date_str).strftime('%Y-%m-%d')
+        return parsed_date
+    except Exception:
+        return str(value)
+
+def get_current_user(req):
+    return getattr(req, 'user', {}).get('username', 'system')
+
+# =====================================
+# AUTHENTICATION DECORATORS
+# =====================================
+def authenticate_token(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return jsonify({"message": "No token provided."}), 401
+        
+        token = auth_header.split(" ")[1]
+        try:
+            user = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            request.user = user  # Attach user payload to the request
+        except jwt.ExpiredSignatureError:
+            return jsonify({"message": "Session expired. Please log in again."}), 403
+        except jwt.InvalidTokenError:
+            return jsonify({"message": "Invalid token."}), 403
+        
+        return f(*args, **kwargs)
+    return decorated
+
+def require_admin(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if getattr(request, 'user', {}).get('access_right') != 'admin':
+            return jsonify({"message": "Forbidden: Admins only."}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+# (Your @app.route('/api/manager-yearly/<project_id>') goes below here!)
+
+# ==========================================
+# 2. YOUR API ROUTES (The Backend)
+# ==========================================
+
+@app.route('/api/manager-yearly/<project_id>', methods=['PUT'])
+# @authenticate_token  <-- Uncomment these once you translate the auth logic!
+# @require_admin
+def update_manager_yearly(project_id):
+    try:
+        data = request.get_json()
+        # current_user = get_current_user(request) 
+        current_year = datetime.now().year
+        
+        # ... (The rest of the Python route code I provided in the previous message goes here) ...
+        
+        return jsonify({"message": "Project updated successfully."}), 200
+
+    except Exception as e:
+        print(f"Error updating project: {str(e)}")
+        return jsonify({"message": str(e)}), 500
+
+# (You will eventually paste the rest of your translated routes here: 
+# /api/login, /api/project-values, etc.)
+
+
+# ==========================================
+# 3. VUE.JS FRONTEND ROUTES (The Catch-All)
+# ==========================================
+
+@app.route("/")
+def index():
+    return send_from_directory("dist", "index.html")
+
+@app.route("/<path:path>")
+def static_files(path):
+    try:
+        return send_from_directory("dist", path)
+    except Exception:
+        return send_from_directory("dist", "index.html")
+
+
+# ==========================================
+# 4. SERVER STARTUP
+# ==========================================
+
+if __name__ == "__main__":
+    # Get the dynamic port assigned by Databricks
+    port = int(os.environ.get("DATABRICKS_APP_PORT", 8000))
+    
+    # Start the server on 0.0.0.0 so Databricks can route traffic to it
+    app.run(host="0.0.0.0", port=port, debug=False)
