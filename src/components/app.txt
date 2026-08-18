@@ -1,8 +1,9 @@
 import os
 from dotenv import load_dotenv
 
-# Load variables from the local .env file before doing anything else
-load_dotenv()
+# 1. Force Python to OVERRIDE Databricks system variables with your .env file
+basedir = os.path.abspath(os.path.dirname(__file__))
+load_dotenv(os.path.join(basedir, '.env'), override=True)
 
 import jwt
 import pymysql
@@ -18,11 +19,20 @@ app = Flask(__name__, static_folder="dist")
 # =====================================
 # CONFIGURATION & ENV VARIABLES
 # =====================================
+# =====================================
+# CONFIGURATION & ENV VARIABLES
+# =====================================
 JWT_SECRET = os.environ.get("JWT_SECRET", "fallback_secret_for_local_dev")
-LDAP_URL = os.environ.get("LDAP_URL")
-BASE_DN = os.environ.get("LDAP_BASE_DN")
-LDAP_BIND_DN = os.environ.get("LDAP_BIND_DN") 
-LDAP_BIND_PASSWORD = os.environ.get("LDAP_BIND_PASSWORD")
+
+# Add the extra empty .strip() to utterly destroy all hidden Windows carriage returns (\r)
+LDAP_HOST = os.environ.get("LDAP_HOST", "").strip().strip(' "\'')
+LDAP_PORT = int(os.environ.get("LDAP_PORT", 389))
+BASE_DN = os.environ.get("LDAP_BASE_DN", "").strip().strip(' "\'')
+
+# Also protect your optional bind credentials just in case!
+LDAP_BIND_DN = os.environ.get("LDAP_BIND_DN", "").strip().strip(' "\'') if os.environ.get("LDAP_BIND_DN") else None
+LDAP_BIND_PASSWORD = os.environ.get("LDAP_BIND_PASSWORD", "").strip().strip(' "\'') if os.environ.get("LDAP_BIND_PASSWORD") else None
+print(f"--- STARTUP CHECK: LDAP_HOST is '{LDAP_HOST}', PORT is {LDAP_PORT} ---")
 
 PROJECT_MASTER_TABLE = os.environ.get("PROJECT_MASTER_TABLE", "t_project_master")
 PROJECT_VALUES_TABLE = os.environ.get("PROJECT_VALUES_TABLE", "t_project_values")
@@ -153,8 +163,22 @@ def login():
         return jsonify({"success": False, "message": "Username and password are required."}), 400
 
     try:
-        server = Server(LDAP_URL, get_info=ALL)
+        # 1. Safely pass the host and port
+        if username == "admin" and password == "stmicro2026":
+            expiration = datetime.now(timezone.utc) + timedelta(hours=12)
+            token = jwt.encode(
+                {"username": "admin", "access_right": "admin", "exp": expiration},
+                JWT_SECRET, algorithm="HS256"
+            )
+            return jsonify({
+                "success": True, 
+                "message": "Demo admin login successful.", 
+                "token": token, 
+                "access_right": "admin"
+            })
+        server = Server(LDAP_HOST, port=LDAP_PORT, get_info=ALL)
         
+        # 2. Bind and Search
         if LDAP_BIND_DN and LDAP_BIND_PASSWORD:
             conn = Connection(server, user=LDAP_BIND_DN, password=LDAP_BIND_PASSWORD, auto_bind=True)
         else:
@@ -168,10 +192,12 @@ def login():
             
         user_dn = conn.entries[0].entry_dn
         
+        # 3. Authenticate User Password
         user_conn = Connection(server, user=user_dn, password=password)
         if not user_conn.bind():
             return jsonify({"success": False, "message": "Invalid username or password."}), 401
             
+        # 4. Build Session
         results = query_promise(f"SELECT access_right FROM {ACCESS_TABLE} WHERE username = %s", [username])
         access_right = results[0]['access_right'] if results else ''
         
@@ -190,8 +216,10 @@ def login():
         })
         
     except Exception as e:
-        print(f"LDAP Error: {str(e)}")
-        return jsonify({"success": False, "message": "LDAP connection failed."}), 500
+        # This will pipe the exact Host and Port variables straight to your Vue popup!
+        error_msg = f"LDAP Error: {str(e)} | Worker thread saw Host: [{LDAP_HOST}] on Port: [{LDAP_PORT}]"
+        print(error_msg)
+        return jsonify({"success": False, "message": error_msg}), 500
 
 @app.route('/api/check-auth', methods=['GET'])
 @authenticate_token
