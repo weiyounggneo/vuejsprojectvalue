@@ -831,8 +831,8 @@ def import_project_master():
 
 
 @app.route('/api/manager-yearly/<project_id>', methods=['PUT'])
-# @authenticate_token  <-- Uncomment these once you translate the auth logic!
-# @require_admin
+@authenticate_token  
+@require_admin
 def update_manager_yearly(project_id):
     try:
         data = request.get_json()
@@ -849,6 +849,239 @@ def update_manager_yearly(project_id):
 
 # (You will eventually paste the rest of your translated routes here: 
 # /api/login, /api/project-values, etc.)
+
+
+# ==========================================
+# PHASE 5: HISTORY, METRICS, & COLUMNS
+# ==========================================
+
+# ------------------------------------------
+# HELPER FOR DYNAMIC COLUMNS
+# ------------------------------------------
+def get_table_columns(table_name, db_name=None):
+    db_to_use = db_name or os.environ.get("DB_NAME")
+    sql = """
+        SELECT COLUMN_NAME
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
+        ORDER BY ORDINAL_POSITION
+    """
+    rows = query_promise(sql, [db_to_use, table_name])
+    return [r['COLUMN_NAME'] for r in rows]
+
+@app.route('/api/project-master/columns', methods=['GET'])
+@authenticate_token
+def get_project_master_columns():
+    try:
+        return jsonify(get_table_columns(PROJECT_MASTER_TABLE))
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+@app.route('/api/project-values/columns', methods=['GET'])
+@authenticate_token
+def get_project_values_columns():
+    try:
+        return jsonify(get_table_columns(PROJECT_VALUES_TABLE))
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+@app.route('/api/project-statuses', methods=['GET'])
+@authenticate_token
+def get_project_statuses():
+    try:
+        rows = query_promise("SELECT status_name FROM t_project_statuses ORDER BY status_name ASC")
+        return jsonify([r['status_name'] for r in rows])
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+# ------------------------------------------
+# MANAGER METRICS & POST ROUTE
+# ------------------------------------------
+@app.route('/api/manager-site-targets', methods=['GET'])
+@authenticate_token
+def get_manager_site_targets():
+    try:
+        rows = bem_query_promise(f"SELECT * FROM {MANAGER_SITE_TARGETS_TABLE}")
+        return jsonify(rows)
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+@app.route('/api/manager-yearly/pipeline-velocity', methods=['GET'])
+@authenticate_token
+def get_pipeline_velocity():
+    try:
+        rows = bem_query_promise(f"""
+            SELECT 
+                DATE_FORMAT(start_date, '%Y-%m') AS month_key,
+                DATE_FORMAT(start_date, '%%b %%Y') AS month_label,
+                SUM(CASE WHEN phase_name = 'G1' THEN 1 ELSE 0 END) AS g1_count,
+                SUM(CASE WHEN phase_name = 'G2' THEN 1 ELSE 0 END) AS g2_count,
+                SUM(CASE WHEN phase_name = 'G3' THEN 1 ELSE 0 END) AS g3_count,
+                COUNT(*) AS total_transitions
+            FROM {MANAGER_PHASES_TABLE}
+            WHERE phase_name IN ('G1', 'G2', 'G3')
+            GROUP BY month_key, month_label
+            ORDER BY month_key DESC
+            LIMIT 12
+        """)
+        formatted_data = [{
+            "month": r['month_label'],
+            "g1": float(r['g1_count']),
+            "g2": float(r['g2_count']),
+            "g3": float(r['g3_count']),
+            "total": float(r['total_transitions'])
+        } for r in rows]
+        
+        return jsonify(formatted_data)
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+@app.route('/api/manager-yearly', methods=['POST'])
+@authenticate_token
+@require_admin
+def create_manager_yearly():
+    try:
+        data = request.get_json()
+        payload = {
+            "project_id": normalize_text(data.get('projectId')),
+            "project_name": normalize_text(data.get('projectName')),
+            "project_status": normalize_text(data.get('projectStatus')),
+            "pillars": normalize_text(data.get('pillars')),
+            "sites": normalize_text(data.get('sites')),
+            "current_pmo_gate": normalize_text(data.get('currentPmoGate')),
+            "dtit_involved": normalize_text(data.get('dtitInvolved')),
+            "ai_aa_a_type": normalize_text(data.get('aiAaAType')),
+            "foak_noak": normalize_text(data.get('foakNoak')),
+            "target_g1_date": parse_standard_date(data.get('targetG1Date')),
+            "target_g2_date": parse_standard_date(data.get('targetG2Date')),
+            "target_g3_date": parse_standard_date(data.get('targetG3Date')),
+            "target_closed_date": parse_standard_date(data.get('targetClosedDate'))
+        }
+
+        if not payload['project_id'] or not payload['project_name']:
+            return jsonify({"message": "Project ID and Project Name are required."}), 400
+
+        try:
+            bem_query_promise(f"""
+                INSERT INTO {MANAGER_PROJECTS_TABLE}
+                (project_id, project_name, project_status, pillar, site, current_pmo_gate, dtit_involved, ai_type, foak_noak,
+                 target_g1_date, target_g2_date, target_g3_date, target_closed_date)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, [
+                payload['project_id'], payload['project_name'], payload['project_status'], payload['pillars'], payload['sites'],
+                payload['current_pmo_gate'], payload['dtit_involved'], payload['ai_aa_a_type'], payload['foak_noak'],
+                payload['target_g1_date'], payload['target_g2_date'], payload['target_g3_date'], payload['target_closed_date']
+            ])
+        except pymysql.err.IntegrityError as e:
+            if e.args[0] == 1062: # ER_DUP_ENTRY
+                return jsonify({"message": "Project ID already exists."}), 409
+            raise e
+
+        # Open initial phase in ledger if a status was provided
+        if payload['project_status']:
+            bem_query_promise(f"""
+                INSERT INTO {MANAGER_PHASES_TABLE} (project_id, phase_name, start_date) 
+                VALUES (%s, %s, CURDATE())
+            """, [payload['project_id'], payload['project_status']])
+
+        return jsonify({"message": "Project created successfully.", "project_id": payload['project_id']}), 201
+
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+# ------------------------------------------
+# ALL AUDIT / HISTORY LOG ROUTES
+# ------------------------------------------
+@app.route('/api/project-master/history/all', methods=['GET'])
+@authenticate_token
+@require_admin
+def get_project_master_history_all():
+    try:
+        rows = query_promise(f"""
+            SELECT history_id, project_code, project_name, project_type,
+                   use_case_investment, project_description, project_status, changed_by, 
+                   DATE_FORMAT(changed_at, '%Y-%m-%d %H:%i:%s') AS changed_at, action_type
+            FROM {MASTER_HISTORY_TABLE} ORDER BY changed_at DESC
+        """)
+        return jsonify(rows)
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+@app.route('/api/project-master/<project_code>/history', methods=['GET'])
+@authenticate_token
+def get_project_master_history(project_code):
+    try:
+        rows = query_promise(f"""
+            SELECT history_id, project_code, project_name, project_type,
+                   use_case_investment, project_description, project_status, changed_by, 
+                   DATE_FORMAT(changed_at, '%Y-%m-%d %H:%i:%s') AS changed_at, action_type
+            FROM {MASTER_HISTORY_TABLE} WHERE project_code = %s ORDER BY changed_at DESC
+        """, [project_code])
+        return jsonify(rows)
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+@app.route('/api/project-values/history/all', methods=['GET'])
+@authenticate_token
+@require_admin
+def get_project_values_history_all():
+    try:
+        rows = query_promise(f"""
+            SELECT history_id, metric_id, project_code, DATE_FORMAT(week_end, '%Y-%m-%d') AS week_end,
+                   capacity_improvement, yield_savings, people_productivity, quality_improvement,
+                   changed_by, DATE_FORMAT(changed_at, '%Y-%m-%d %H:%i:%s') AS changed_at, action_type
+            FROM {HISTORY_TABLE} ORDER BY changed_at DESC
+        """)
+        return jsonify(rows)
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+@app.route('/api/project-values/<metric_id>/history', methods=['GET'])
+@authenticate_token
+def get_project_values_history(metric_id):
+    try:
+        rows = query_promise(f"""
+            SELECT history_id, metric_id, project_code, DATE_FORMAT(week_end, '%Y-%m-%d') AS week_end,
+                   capacity_improvement, yield_savings, people_productivity, quality_improvement,
+                   changed_by, DATE_FORMAT(changed_at, '%Y-%m-%d %H:%i:%s') AS changed_at, action_type
+            FROM {HISTORY_TABLE} WHERE metric_id = %s ORDER BY changed_at DESC
+        """, [metric_id])
+        return jsonify(rows)
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+@app.route('/api/manager-yearly/history/all', methods=['GET'])
+@authenticate_token
+@require_admin
+def get_manager_yearly_history_all():
+    try:
+        rows = bem_query_promise(f"""
+            SELECT history_id, project_id, project_name, project_status, 
+                   capacity_gain_value, capacity_gain_pct, dl_value, dl_equivalent,
+                   idl_value, idl_fte, yield_value, yield_gain_pct, quality_value, quality_cases, comment_text,
+                   changed_by, DATE_FORMAT(changed_at, '%Y-%m-%d %H:%i:%s') AS changed_at, action_type
+            FROM {MANAGER_HISTORY_TABLE} ORDER BY changed_at DESC
+        """)
+        return jsonify(rows)
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+@app.route('/api/manager-yearly/<project_id>/history', methods=['GET'])
+@authenticate_token
+def get_manager_yearly_history(project_id):
+    try:
+        rows = bem_query_promise(f"""
+            SELECT history_id, project_id, project_name, project_status, 
+                   capacity_gain_value, capacity_gain_pct, dl_value, dl_equivalent,
+                   idl_value, idl_fte, yield_value, yield_gain_pct, quality_value, quality_cases, comment_text,
+                   changed_by, DATE_FORMAT(changed_at, '%Y-%m-%d %H:%i:%s') AS changed_at, action_type
+            FROM {MANAGER_HISTORY_TABLE} WHERE project_id = %s ORDER BY changed_at DESC
+        """, [project_id])
+        return jsonify(rows)
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+
 
 # ==========================================
 # 3. VUE.JS FRONTEND ROUTES (The Catch-All)
