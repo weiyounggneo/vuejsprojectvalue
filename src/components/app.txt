@@ -600,6 +600,236 @@ def import_project_values():
         return jsonify({"message": str(e) or 'Excel import failed.'}), 500
 
 
+# ------------------------------------------
+# PROJECT MASTER MANAGEMENT
+# ------------------------------------------
+
+def validate_project_master_payload(payload):
+    if not payload.get('project_code'): return 'project_code is required.'
+    if not payload.get('project_name'): return 'project_name is required.'
+    if not payload.get('project_type'): return 'project_type is required.'
+    return None
+
+@app.route('/api/project-master', methods=['GET'])
+@authenticate_token
+def get_project_master():
+    try:
+        rows = query_promise(f"""
+            SELECT project_code, project_name, project_description, project_type, 
+                   use_case_investment, project_status
+            FROM {PROJECT_MASTER_TABLE}
+            ORDER BY project_name ASC
+        """)
+        return jsonify(rows)
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+@app.route('/api/project-master', methods=['POST'])
+@authenticate_token
+@require_admin
+def create_project_master():
+    try:
+        data = request.get_json()
+        payload = {
+            "project_code": normalize_text(data.get('project_code')),
+            "project_name": normalize_text(data.get('project_name')),
+            "project_description": normalize_text(data.get('project_description')),
+            "project_type": normalize_text(data.get('project_type')),
+            "use_case_investment": normalize_number(data.get('use_case_investment')),
+            "project_status": normalize_text(data.get('project_status')) or 'Active'
+        }
+
+        validation_error = validate_project_master_payload(payload)
+        if validation_error:
+            return jsonify({"message": validation_error}), 400
+
+        # Check Duplicate
+        duplicate = query_promise(
+            f"SELECT project_code FROM {PROJECT_MASTER_TABLE} WHERE project_code = %s OR project_name = %s LIMIT 1",
+            [payload['project_code'], payload['project_name']]
+        )
+        if duplicate:
+            return jsonify({"message": "Project code or project name already exists."}), 409
+
+        # Insert
+        query_promise(f"""
+            INSERT INTO {PROJECT_MASTER_TABLE}
+            (project_code, project_name, project_description, project_type, use_case_investment, project_status)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, [
+            payload['project_code'], payload['project_name'], payload['project_description'],
+            payload['project_type'], payload['use_case_investment'] or 0, payload['project_status']
+        ])
+
+        new_row = query_promise(f"SELECT * FROM {PROJECT_MASTER_TABLE} WHERE project_code = %s", [payload['project_code']])
+        return jsonify(new_row[0]), 201
+
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+
+@app.route('/api/project-master/<project_code>', methods=['PUT'])
+@authenticate_token
+@require_admin
+def update_project_master(project_code):
+    try:
+        data = request.get_json()
+        current_user = get_current_user(request)
+        payload = {
+            "project_code": normalize_text(data.get('project_code')),
+            "project_name": normalize_text(data.get('project_name')),
+            "project_description": normalize_text(data.get('project_description')),
+            "project_type": normalize_text(data.get('project_type')),
+            "use_case_investment": normalize_number(data.get('use_case_investment')),
+            "project_status": normalize_text(data.get('project_status')) or 'Active'
+        }
+
+        validation_error = validate_project_master_payload(payload)
+        if validation_error:
+            return jsonify({"message": validation_error}), 400
+
+        # Check Duplicate (excluding current)
+        duplicate = query_promise(f"""
+            SELECT project_code FROM {PROJECT_MASTER_TABLE} 
+            WHERE (project_code = %s OR project_name = %s) AND project_code != %s LIMIT 1
+        """, [payload['project_code'], payload['project_name'], project_code])
+        
+        if duplicate:
+            return jsonify({"message": "Another project with the same code or name already exists."}), 409
+
+        # Log History Before Update
+        query_promise(f"""
+            INSERT INTO {MASTER_HISTORY_TABLE} (
+                project_code, project_name, project_description, project_type, use_case_investment, project_status, changed_by, action_type
+            )
+            SELECT project_code, project_name, project_description, project_type, use_case_investment, project_status, %s, 'UPDATE'
+            FROM {PROJECT_MASTER_TABLE} WHERE project_code = %s
+        """, [current_user, project_code])
+
+        # Execute Update
+        result = query_promise(f"""
+            UPDATE {PROJECT_MASTER_TABLE}
+            SET project_code = %s, project_name = %s, project_description = %s, project_type = %s, use_case_investment = %s, project_status = %s
+            WHERE project_code = %s
+        """, [
+            payload['project_code'], payload['project_name'], payload['project_description'], 
+            payload['project_type'], payload['use_case_investment'] or 0, payload['project_status'], project_code
+        ])
+
+        if result.get('affectedRows') == 0:
+            return jsonify({"message": "Project not found."}), 404
+
+        updated_row = query_promise(f"SELECT * FROM {PROJECT_MASTER_TABLE} WHERE project_code = %s", [payload['project_code']])
+        return jsonify(updated_row[0]), 200
+
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+
+@app.route('/api/project-master/<project_code>', methods=['DELETE'])
+@authenticate_token
+@require_admin
+def delete_project_master(project_code):
+    try:
+        # Check if project has associated values
+        usage = query_promise(f"SELECT COUNT(*) AS cnt FROM {PROJECT_VALUES_TABLE} WHERE project_code = %s", [project_code])
+        if usage and usage[0]['cnt'] > 0:
+            return jsonify({"message": "Cannot delete project master row because project values already exist for this project."}), 409
+
+        result = query_promise(f"DELETE FROM {PROJECT_MASTER_TABLE} WHERE project_code = %s", [project_code])
+        
+        if result.get('affectedRows') == 0:
+            return jsonify({"message": "Project not found."}), 404
+
+        return jsonify({"message": "Project deleted successfully."}), 200
+
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+
+@app.route('/api/project-master/upload-excel', methods=['POST'])
+@authenticate_token
+@require_admin
+def import_project_master():
+    if 'file' not in request.files:
+        return jsonify({"message": "No file uploaded."}), 400
+
+    file = request.files['file']
+    current_user = get_current_user(request)
+
+    try:
+        df = pd.read_excel(file)
+        df = df.fillna('')
+        
+        first_row_columns = df.columns.tolist()
+        expected_columns = ['project_code', 'project_name', 'project_type']
+        missing = [col for col in expected_columns if col not in first_row_columns]
+
+        if missing:
+            return jsonify({"message": f"Excel missing columns: {', '.join(missing)}"}), 400
+
+        inserted = 0
+        updated = 0
+
+        for _, row in df.iterrows():
+            payload = {
+                "project_code": normalize_text(row.get('project_code')),
+                "project_name": normalize_text(row.get('project_name')),
+                "project_description": normalize_text(row.get('project_description')),
+                "project_type": normalize_text(row.get('project_type')),
+                "use_case_investment": normalize_number(row.get('use_case_investment')),
+                "project_status": normalize_text(row.get('project_status')) or 'Active'
+            }
+
+            if validate_project_master_payload(payload):
+                continue
+
+            existing = query_promise(
+                f"SELECT project_code FROM {PROJECT_MASTER_TABLE} WHERE project_code = %s LIMIT 1",
+                [payload['project_code']]
+            )
+
+            if existing:
+                # Log History Before Update
+                query_promise(f"""
+                    INSERT INTO {MASTER_HISTORY_TABLE} (
+                        project_code, project_name, project_description, project_type, use_case_investment, project_status, changed_by, action_type
+                    )
+                    SELECT project_code, project_name, project_description, project_type, use_case_investment, project_status, %s, 'UPDATE'
+                    FROM {PROJECT_MASTER_TABLE} WHERE project_code = %s
+                """, [current_user, payload['project_code']])
+
+                # Update
+                query_promise(f"""
+                    UPDATE {PROJECT_MASTER_TABLE}
+                    SET project_name = %s, project_description = %s, project_type = %s, use_case_investment = %s, project_status = %s
+                    WHERE project_code = %s
+                """, [
+                    payload['project_name'], payload['project_description'], payload['project_type'], 
+                    payload['use_case_investment'] or 0, payload['project_status'], payload['project_code']
+                ])
+                updated += 1
+            else:
+                # Insert
+                query_promise(f"""
+                    INSERT INTO {PROJECT_MASTER_TABLE}
+                    (project_code, project_name, project_description, project_type, use_case_investment, project_status)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, [
+                    payload['project_code'], payload['project_name'], payload['project_description'], 
+                    payload['project_type'], payload['use_case_investment'] or 0, payload['project_status']
+                ])
+                inserted += 1
+
+        return jsonify({"message": f"Project master Excel upload completed. Inserted: {inserted}, Updated: {updated}."}), 200
+
+    except Exception as e:
+        print(f"Excel Error: {str(e)}")
+        return jsonify({"message": str(e) or 'Excel upload failed.'}), 500
+
+
+
+
 @app.route('/api/manager-yearly/<project_id>', methods=['PUT'])
 # @authenticate_token  <-- Uncomment these once you translate the auth logic!
 # @require_admin
