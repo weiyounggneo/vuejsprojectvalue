@@ -3,6 +3,7 @@ import jwt
 import pymysql
 import pandas as pd
 from functools import wraps
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from flask import Flask, request, jsonify, send_from_directory
 from ldap3 import Server, Connection, ALL
@@ -15,6 +16,8 @@ app = Flask(__name__, static_folder="dist")
 JWT_SECRET = os.environ.get("JWT_SECRET", "fallback_secret_for_local_dev")
 LDAP_URL = os.environ.get("LDAP_URL")
 BASE_DN = os.environ.get("LDAP_BASE_DN")
+LDAP_BIND_DN = os.environ.get("LDAP_BIND_DN") 
+LDAP_BIND_PASSWORD = os.environ.get("LDAP_BIND_PASSWORD")
 
 PROJECT_MASTER_TABLE = os.environ.get("PROJECT_MASTER_TABLE", "t_project_master")
 PROJECT_VALUES_TABLE = os.environ.get("PROJECT_VALUES_TABLE", "t_project_values")
@@ -35,14 +38,13 @@ MANAGER_PHASES_TABLE = "t_manager_project_phases"
 # DATABASE HELPERS 
 # =====================================
 def get_db_connection(is_bem=False):
-    """Creates a fresh connection per request, mimicking connection pooling."""
     return pymysql.connect(
         host=os.environ.get("DB_HOST"),
         user=os.environ.get("BEM_DB_USER") if is_bem else os.environ.get("DB_USER"),
         password=os.environ.get("BEM_DB_PASSWORD") if is_bem else os.environ.get("DB_PASSWORD"),
         database=os.environ.get("BEM_DB_NAME") if is_bem else os.environ.get("DB_NAME"),
         port=int(os.environ.get("DB_PORT", 3306)),
-        cursorclass=pymysql.cursors.DictCursor # Returns rows as dictionaries (JSON objects)
+        cursorclass=pymysql.cursors.DictCursor
     )
 
 def query_promise(sql, params=None, is_bem=False):
@@ -59,6 +61,19 @@ def query_promise(sql, params=None, is_bem=False):
 
 def bem_query_promise(sql, params=None):
     return query_promise(sql, params, is_bem=True)
+
+@contextmanager
+def transaction_scope(is_bem=False):
+    """Provides an atomic transactional scope for multi-query operations."""
+    connection = get_db_connection(is_bem)
+    try:
+        yield connection
+        connection.commit()
+    except Exception as e:
+        connection.rollback()
+        raise e
+    finally:
+        connection.close()
 
 # =====================================
 # DATA NORMALIZATION HELPERS
@@ -134,7 +149,12 @@ def login():
 
     try:
         server = Server(LDAP_URL, get_info=ALL)
-        conn = Connection(server, auto_bind=True)
+        
+        if LDAP_BIND_DN and LDAP_BIND_PASSWORD:
+            conn = Connection(server, user=LDAP_BIND_DN, password=LDAP_BIND_PASSWORD, auto_bind=True)
+        else:
+            conn = Connection(server, auto_bind=True)
+            
         search_filter = f"(uid={username})"
         conn.search(BASE_DN, search_filter, attributes=['dn'])
         
@@ -248,12 +268,12 @@ def get_project_values():
             SELECT
                 v.metric_id, v.project_code, m.project_name, m.project_type,
                 m.project_description, m.project_status, m.use_case_investment,
-                DATE_FORMAT(v.week_end, '%Y-%m-%d') AS week_end,
+                DATE_FORMAT(v.month_end, '%Y-%m-%d') AS month_end,
                 v.capacity_improvement, v.people_productivity, 
                 v.quality_improvement, v.yield_savings
             FROM {PROJECT_VALUES_TABLE} v
             LEFT JOIN {PROJECT_MASTER_TABLE} m ON v.project_code = m.project_code
-            ORDER BY v.week_end DESC, m.project_name ASC
+            ORDER BY v.month_end DESC, m.project_name ASC
         """)
         return jsonify(rows)
     except Exception as e:
@@ -359,7 +379,7 @@ def create_project_value():
         data = request.get_json()
         p_code = normalize_text(data.get('project_code'))
         p_name = normalize_text(data.get('project_name'))
-        week_end = parse_standard_date(data.get('week_end'))
+        month_end = parse_standard_date(data.get('month_end'))
 
         if not p_code and not p_name:
             return jsonify({"message": "project_code or project_name is required."}), 400
@@ -376,18 +396,18 @@ def create_project_value():
             return jsonify({"message": "Selected project does not exist in project master."}), 400
 
         existing = query_promise(
-            f"SELECT metric_id FROM {PROJECT_VALUES_TABLE} WHERE project_code = %s AND CAST(week_end AS DATE) = CAST(%s AS DATE)",
-            [project['project_code'], week_end]
+            f"SELECT metric_id FROM {PROJECT_VALUES_TABLE} WHERE project_code = %s AND CAST(month_end AS DATE) = CAST(%s AS DATE)",
+            [project['project_code'], month_end]
         )
         if existing:
-            return jsonify({"message": f"Data for {project['project_name']} on week {week_end} already exists. Please select it from the table and click 'Update' instead."}), 409
+            return jsonify({"message": f"Data for {project['project_name']} on month ending {month_end} already exists. Please select it from the table and click 'Update' instead."}), 409
 
         result = query_promise(f"""
             INSERT INTO {PROJECT_VALUES_TABLE}
-            (project_code, week_end, capacity_improvement, people_productivity, quality_improvement, yield_savings)
+            (project_code, month_end, capacity_improvement, people_productivity, quality_improvement, yield_savings)
             VALUES (%s, %s, %s, %s, %s, %s)
         """, [
-            project['project_code'], week_end,
+            project['project_code'], month_end,
             normalize_number(data.get('capacity_improvement')),
             normalize_number(data.get('people_productivity')),
             normalize_number(data.get('quality_improvement')),
@@ -396,7 +416,7 @@ def create_project_value():
 
         new_row = query_promise(f"""
             SELECT v.metric_id, v.project_code, m.project_name, m.project_type, m.project_description, m.project_status, m.use_case_investment,
-                   DATE_FORMAT(v.week_end, '%Y-%m-%d') AS week_end, v.capacity_improvement, v.people_productivity, v.quality_improvement, v.yield_savings
+                   DATE_FORMAT(v.month_end, '%Y-%m-%d') AS month_end, v.capacity_improvement, v.people_productivity, v.quality_improvement, v.yield_savings
             FROM {PROJECT_VALUES_TABLE} v
             LEFT JOIN {PROJECT_MASTER_TABLE} m ON v.project_code = m.project_code
             WHERE v.metric_id = %s
@@ -415,7 +435,7 @@ def update_project_value(metric_id):
         current_user = get_current_user(request)
         p_code = normalize_text(data.get('project_code'))
         p_name = normalize_text(data.get('project_name'))
-        week_end = parse_standard_date(data.get('week_end'))
+        month_end = parse_standard_date(data.get('month_end'))
 
         project = None
         if p_code:
@@ -429,27 +449,27 @@ def update_project_value(metric_id):
             return jsonify({"message": "Selected project does not exist in project master."}), 400
 
         existing = query_promise(
-            f"SELECT metric_id FROM {PROJECT_VALUES_TABLE} WHERE project_code = %s AND CAST(week_end AS DATE) = CAST(%s AS DATE) AND metric_id != %s",
-            [project['project_code'], week_end, metric_id]
+            f"SELECT metric_id FROM {PROJECT_VALUES_TABLE} WHERE project_code = %s AND CAST(month_end AS DATE) = CAST(%s AS DATE) AND metric_id != %s",
+            [project['project_code'], month_end, metric_id]
         )
         if existing:
-            return jsonify({"message": f"Cannot update: A different record for {project['project_name']} already exists on {week_end}."}), 409
+            return jsonify({"message": f"Cannot update: A different record for {project['project_name']} already exists on {month_end}."}), 409
 
         query_promise(f"""
             INSERT INTO {HISTORY_TABLE} (
-                metric_id, project_code, week_end, capacity_improvement, yield_savings, people_productivity, quality_improvement, changed_by, action_type
+                metric_id, project_code, month_end, capacity_improvement, yield_savings, people_productivity, quality_improvement, changed_by, action_type
             )
-            SELECT metric_id, project_code, week_end, capacity_improvement, yield_savings, people_productivity, quality_improvement, %s, 'UPDATE'
+            SELECT metric_id, project_code, month_end, capacity_improvement, yield_savings, people_productivity, quality_improvement, %s, 'UPDATE'
             FROM {PROJECT_VALUES_TABLE}
             WHERE metric_id = %s
         """, [current_user, metric_id])
 
         query_promise(f"""
             UPDATE {PROJECT_VALUES_TABLE}
-            SET project_code = %s, week_end = %s, capacity_improvement = %s, people_productivity = %s, quality_improvement = %s, yield_savings = %s
+            SET project_code = %s, month_end = %s, capacity_improvement = %s, people_productivity = %s, quality_improvement = %s, yield_savings = %s
             WHERE metric_id = %s
         """, [
-            project['project_code'], week_end,
+            project['project_code'], month_end,
             normalize_number(data.get('capacity_improvement')),
             normalize_number(data.get('people_productivity')),
             normalize_number(data.get('quality_improvement')),
@@ -459,7 +479,7 @@ def update_project_value(metric_id):
 
         updated_row = query_promise(f"""
             SELECT v.metric_id, v.project_code, m.project_name, m.project_type, m.project_description, m.project_status, m.use_case_investment,
-                   DATE_FORMAT(v.week_end, '%Y-%m-%d') AS week_end, v.capacity_improvement, v.people_productivity, v.quality_improvement, v.yield_savings
+                   DATE_FORMAT(v.month_end, '%Y-%m-%d') AS month_end, v.capacity_improvement, v.people_productivity, v.quality_improvement, v.yield_savings
             FROM {PROJECT_VALUES_TABLE} v
             LEFT JOIN {PROJECT_MASTER_TABLE} m ON v.project_code = m.project_code
             WHERE v.metric_id = %s
@@ -486,7 +506,7 @@ def import_project_values():
         df = df.fillna('')
         
         first_row_columns = df.columns.tolist()
-        minimum_columns = ['week_end', 'capacity_improvement', 'people_productivity', 'quality_improvement', 'yield_savings']
+        minimum_columns = ['month_end', 'capacity_improvement', 'people_productivity', 'quality_improvement', 'yield_savings']
         missing_minimum = [col for col in minimum_columns if col not in first_row_columns]
 
         if missing_minimum:
@@ -504,7 +524,7 @@ def import_project_values():
             try:
                 p_code = normalize_text(row.get('project_code'))
                 p_name = normalize_text(row.get('project_name'))
-                week_end = parse_standard_date(row.get('week_end'))
+                month_end = parse_standard_date(row.get('month_end'))
 
                 project = None
                 if p_code:
@@ -518,11 +538,11 @@ def import_project_values():
                     raise Exception('Project not found in project master.')
 
                 resolved_code = project['project_code']
-                unique_key = f"{resolved_code}_{week_end}"
+                unique_key = f"{resolved_code}_{month_end}"
                 
                 parsed_map[unique_key] = {
                     "resolved_project_code": resolved_code,
-                    "week_end": week_end,
+                    "month_end": month_end,
                     "capacity_improvement": normalize_number(row.get('capacity_improvement')),
                     "people_productivity": normalize_number(row.get('people_productivity')),
                     "quality_improvement": normalize_number(row.get('quality_improvement')),
@@ -537,12 +557,12 @@ def import_project_values():
 
         for payload in unique_payloads:
             existing = query_promise(
-                f"SELECT metric_id FROM {PROJECT_VALUES_TABLE} WHERE project_code = %s AND CAST(week_end AS DATE) = CAST(%s AS DATE)",
-                [payload['resolved_project_code'], payload['week_end']]
+                f"SELECT metric_id FROM {PROJECT_VALUES_TABLE} WHERE project_code = %s AND CAST(month_end AS DATE) = CAST(%s AS DATE)",
+                [payload['resolved_project_code'], payload['month_end']]
             )
             if existing:
                 if not overwrite:
-                    return jsonify({"requires_confirmation": True, "message": "Duplicate weeks detected. Waiting for user confirmation."}), 409
+                    return jsonify({"requires_confirmation": True, "message": "Duplicate months detected. Waiting for user confirmation."}), 409
                 payload['metric_id'] = existing[0]['metric_id']
                 payload['isUpdate'] = True
             else:
@@ -552,9 +572,9 @@ def import_project_values():
             if payload['isUpdate']:
                 query_promise(f"""
                     INSERT INTO {HISTORY_TABLE} (
-                        metric_id, project_code, week_end, capacity_improvement, yield_savings, people_productivity, quality_improvement, changed_by, action_type
+                        metric_id, project_code, month_end, capacity_improvement, yield_savings, people_productivity, quality_improvement, changed_by, action_type
                     )
-                    SELECT metric_id, project_code, week_end, capacity_improvement, yield_savings, people_productivity, quality_improvement, %s, 'UPDATE'
+                    SELECT metric_id, project_code, month_end, capacity_improvement, yield_savings, people_productivity, quality_improvement, %s, 'UPDATE'
                     FROM {PROJECT_VALUES_TABLE} WHERE metric_id = %s
                 """, [current_user, payload['metric_id']])
                 
@@ -564,9 +584,9 @@ def import_project_values():
                 updated += 1
             else:
                 query_promise(f"""
-                    INSERT INTO {PROJECT_VALUES_TABLE} (project_code, week_end, capacity_improvement, people_productivity, quality_improvement, yield_savings) 
+                    INSERT INTO {PROJECT_VALUES_TABLE} (project_code, month_end, capacity_improvement, people_productivity, quality_improvement, yield_savings) 
                     VALUES (%s, %s, %s, %s, %s, %s)
-                """, [payload['resolved_project_code'], payload['week_end'], payload['capacity_improvement'], payload['people_productivity'], payload['quality_improvement'], payload['yield_savings']])
+                """, [payload['resolved_project_code'], payload['month_end'], payload['capacity_improvement'], payload['people_productivity'], payload['quality_improvement'], payload['yield_savings']])
                 inserted += 1
 
         return jsonify({
@@ -907,108 +927,118 @@ def update_manager_yearly(project_id):
         target_closed_date = parse_standard_date(data.get('targetClosedDate'))
         actual_closed_date = parse_standard_date(data.get('actualClosedDate'))
 
-        current_state_query = f"""
-            SELECT 
-                p.project_name, p.project_status,
-                m.capacity_gain_value, m.capacity_gain_pct, m.dl_value, m.dl_equivalent, 
-                m.idl_value, m.idl_fte, m.yield_value, m.yield_gain_pct, 
-                m.quality_value, m.quality_cases, 
-                c.comment_text
-            FROM {MANAGER_PROJECTS_TABLE} p
-            LEFT JOIN {MANAGER_METRICS_TABLE} m ON p.project_id = m.project_id AND m.reporting_year = %s
-            LEFT JOIN {MANAGER_COMMENTS_TABLE} c ON p.project_id = c.project_id
-            WHERE p.project_id = %s
-            ORDER BY c.created_at DESC LIMIT 1
-        """
-        current_state = bem_query_promise(current_state_query, [current_year, project_id])
+        with transaction_scope(is_bem=True) as conn:
+            with conn.cursor() as cursor:
+                # 0. Get Current State
+                cursor.execute(f"""
+                    SELECT 
+                        p.project_name, p.project_status,
+                        m.capacity_gain_value, m.capacity_gain_pct, m.dl_value, m.dl_equivalent, 
+                        m.idl_value, m.idl_fte, m.yield_value, m.yield_gain_pct, 
+                        m.quality_value, m.quality_cases, 
+                        c.comment_text
+                    FROM {MANAGER_PROJECTS_TABLE} p
+                    LEFT JOIN {MANAGER_METRICS_TABLE} m ON p.project_id = m.project_id AND m.reporting_year = %s
+                    LEFT JOIN {MANAGER_COMMENTS_TABLE} c ON p.project_id = c.project_id
+                    WHERE p.project_id = %s
+                    ORDER BY c.created_at DESC LIMIT 1
+                """, [current_year, project_id])
+                
+                current_state = cursor.fetchall()
 
-        if current_state:
-            curr = current_state[0]
-            history_query = f"""
-                INSERT INTO {MANAGER_HISTORY_TABLE} (
-                    project_id, project_name, project_status, capacity_gain_value, capacity_gain_pct, 
-                    dl_value, dl_equivalent, idl_value, idl_fte, yield_value, yield_gain_pct, 
-                    quality_value, quality_cases, comment_text, changed_by, action_type
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'UPDATE')
-            """
-            bem_query_promise(history_query, [
-                project_id, curr.get('project_name'), curr.get('project_status'), 
-                curr.get('capacity_gain_value'), curr.get('capacity_gain_pct'),
-                curr.get('dl_value'), curr.get('dl_equivalent'), curr.get('idl_value'), curr.get('idl_fte'), 
-                curr.get('yield_value'), curr.get('yield_gain_pct'),
-                curr.get('quality_value'), curr.get('quality_cases'), curr.get('comment_text'), current_user
-            ])
+                if current_state:
+                    curr = current_state[0]
+                    cursor.execute(f"""
+                        INSERT INTO {MANAGER_HISTORY_TABLE} (
+                            project_id, project_name, project_status, capacity_gain_value, capacity_gain_pct, 
+                            dl_value, dl_equivalent, idl_value, idl_fte, yield_value, yield_gain_pct, 
+                            quality_value, quality_cases, comment_text, changed_by, action_type
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'UPDATE')
+                    """, [
+                        project_id, curr.get('project_name'), curr.get('project_status'), 
+                        curr.get('capacity_gain_value'), curr.get('capacity_gain_pct'),
+                        curr.get('dl_value'), curr.get('dl_equivalent'), curr.get('idl_value'), curr.get('idl_fte'), 
+                        curr.get('yield_value'), curr.get('yield_gain_pct'),
+                        curr.get('quality_value'), curr.get('quality_cases'), curr.get('comment_text'), current_user
+                    ])
 
-        if data.get('projectName'):
-            new_status = normalize_text(data.get('projectStatus'))
-            update_master_query = f"""
-                UPDATE {MANAGER_PROJECTS_TABLE} 
-                SET project_name = %s, project_status = %s, pillar = %s, site = %s, 
-                    current_pmo_gate = %s, dtit_involved = %s, ai_type = %s, foak_noak = %s,
-                    target_g1_date = %s, actual_g1_date = %s, 
-                    target_g2_date = %s, actual_g2_date = %s, 
-                    target_g3_date = %s, actual_g3_date = %s, 
-                    target_closed_date = %s, actual_closed_date = %s
-                WHERE project_id = %s
-            """
-            bem_query_promise(update_master_query, [
-                normalize_text(data.get('projectName')), new_status, 
-                normalize_text(data.get('pillars')), normalize_text(data.get('sites')),
-                normalize_text(data.get('currentPmoGate')), normalize_text(data.get('dtitInvolved')), 
-                normalize_text(data.get('aiAaAType')), normalize_text(data.get('foakNoak')), 
-                target_g1_date, actual_g1_date, target_g2_date, actual_g2_date,
-                target_g3_date, actual_g3_date, target_closed_date, actual_closed_date,
-                project_id
-            ])
+                # 1. Update Project Master (Metadata)
+                if data.get('projectName'):
+                    new_status = normalize_text(data.get('projectStatus'))
+                    cursor.execute(f"""
+                        UPDATE {MANAGER_PROJECTS_TABLE} 
+                        SET project_name = %s, project_status = %s, pillar = %s, site = %s, 
+                            current_pmo_gate = %s, dtit_involved = %s, ai_type = %s, foak_noak = %s,
+                            target_g1_date = %s, actual_g1_date = %s, 
+                            target_g2_date = %s, actual_g2_date = %s, 
+                            target_g3_date = %s, actual_g3_date = %s, 
+                            target_closed_date = %s, actual_closed_date = %s
+                        WHERE project_id = %s
+                    """, [
+                        normalize_text(data.get('projectName')), new_status, 
+                        normalize_text(data.get('pillars')), normalize_text(data.get('sites')),
+                        normalize_text(data.get('currentPmoGate')), normalize_text(data.get('dtitInvolved')), 
+                        normalize_text(data.get('aiAaAType')), normalize_text(data.get('foakNoak')), 
+                        target_g1_date, actual_g1_date, target_g2_date, actual_g2_date,
+                        target_g3_date, actual_g3_date, target_closed_date, actual_closed_date,
+                        project_id
+                    ])
 
-            old_status = current_state[0].get('project_status') if current_state else None
-            if old_status != new_status and new_status:
-                bem_query_promise(f"UPDATE {MANAGER_PHASES_TABLE} SET end_date = CURDATE() WHERE project_id = %s AND end_date IS NULL", [project_id])
-                bem_query_promise(f"INSERT INTO {MANAGER_PHASES_TABLE} (project_id, phase_name, start_date) VALUES (%s, %s, CURDATE())", [project_id, new_status])
+                    # Automate Actual Phase Tracking
+                    old_status = current_state[0].get('project_status') if current_state else None
+                    if old_status != new_status and new_status:
+                        cursor.execute(f"UPDATE {MANAGER_PHASES_TABLE} SET end_date = CURDATE() WHERE project_id = %s AND end_date IS NULL", [project_id])
+                        cursor.execute(f"INSERT INTO {MANAGER_PHASES_TABLE} (project_id, phase_name, start_date) VALUES (%s, %s, CURDATE())", [project_id, new_status])
 
-        year_keys = [k for k in data.keys() if k.startswith('year') and len(k) == 8]
-        for key in year_keys:
-            year = int(key.replace('year', ''))
-            val = normalize_number(data.get(key))
-            if val is not None:
-                existing_year = bem_query_promise(f"SELECT project_id FROM {MANAGER_YEARLY_TABLE} WHERE project_id = %s AND savings_year = %s LIMIT 1", [project_id, year])
-                if existing_year:
-                    bem_query_promise(f"UPDATE {MANAGER_YEARLY_TABLE} SET savings_value = %s WHERE project_id = %s AND savings_year = %s", [val, project_id, year])
+                # 2. Update Yearly Savings safely
+                year_keys = [k for k in data.keys() if k.startswith('year') and len(k) == 8]
+                for key in year_keys:
+                    year = int(key.replace('year', ''))
+                    val = normalize_number(data.get(key))
+                    if val is not None:
+                        cursor.execute(f"SELECT project_id FROM {MANAGER_YEARLY_TABLE} WHERE project_id = %s AND savings_year = %s LIMIT 1", [project_id, year])
+                        if cursor.fetchall():
+                            cursor.execute(f"UPDATE {MANAGER_YEARLY_TABLE} SET savings_value = %s WHERE project_id = %s AND savings_year = %s", [val, project_id, year])
+                        else:
+                            cursor.execute(f"INSERT INTO {MANAGER_YEARLY_TABLE} (project_id, savings_year, savings_value) VALUES (%s, %s, %s)", [project_id, year, val])
+
+                # 3. Update Metrics (KPIs)
+                cursor.execute(f"SELECT metrics_id FROM {MANAGER_METRICS_TABLE} WHERE project_id = %s AND reporting_year = %s LIMIT 1", [project_id, current_year])
+                existing_metric = cursor.fetchall()
+
+                metrics_params = [
+                    normalize_number(data.get('capacityGainValue')), normalize_number(data.get('capacityGainPercent')),
+                    normalize_number(data.get('dlValue')), normalize_number(data.get('dlEquivalent')),
+                    normalize_number(data.get('idlValue')), normalize_number(data.get('idlFte')),
+                    normalize_number(data.get('yieldValue')), normalize_number(data.get('yieldPercentGain')),
+                    normalize_number(data.get('qualityValue')), normalize_number(data.get('qualityCases'))
+                ]
+                
+                if existing_metric:
+                    metrics_params.append(existing_metric[0]['metrics_id'])
+                    cursor.execute(f"""
+                        UPDATE {MANAGER_METRICS_TABLE} SET 
+                        capacity_gain_value=%s, capacity_gain_pct=%s, dl_value=%s, dl_equivalent=%s, 
+                        idl_value=%s, idl_fte=%s, yield_value=%s, yield_gain_pct=%s, quality_value=%s, quality_cases=%s 
+                        WHERE metrics_id=%s
+                    """, metrics_params)
                 else:
-                    bem_query_promise(f"INSERT INTO {MANAGER_YEARLY_TABLE} (project_id, savings_year, savings_value) VALUES (%s, %s, %s)", [project_id, year, val])
+                    metrics_params = [project_id, current_year] + metrics_params
+                    cursor.execute(f"""
+                        INSERT INTO {MANAGER_METRICS_TABLE} 
+                        (project_id, reporting_year, capacity_gain_value, capacity_gain_pct, dl_value, dl_equivalent, idl_value, idl_fte, yield_value, yield_gain_pct, quality_value, quality_cases)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, metrics_params)
 
-        existing_metric = bem_query_promise(f"SELECT metrics_id FROM {MANAGER_METRICS_TABLE} WHERE project_id = %s AND reporting_year = %s LIMIT 1", [project_id, current_year])
-        metrics_params = [
-            normalize_number(data.get('capacityGainValue')), normalize_number(data.get('capacityGainPercent')),
-            normalize_number(data.get('dlValue')), normalize_number(data.get('dlEquivalent')),
-            normalize_number(data.get('idlValue')), normalize_number(data.get('idlFte')),
-            normalize_number(data.get('yieldValue')), normalize_number(data.get('yieldPercentGain')),
-            normalize_number(data.get('qualityValue')), normalize_number(data.get('qualityCases'))
-        ]
-        
-        if existing_metric:
-            metrics_params.append(existing_metric[0]['metrics_id'])
-            bem_query_promise(f"""
-                UPDATE {MANAGER_METRICS_TABLE} SET 
-                capacity_gain_value=%s, capacity_gain_pct=%s, dl_value=%s, dl_equivalent=%s, 
-                idl_value=%s, idl_fte=%s, yield_value=%s, yield_gain_pct=%s, quality_value=%s, quality_cases=%s 
-                WHERE metrics_id=%s
-            """, metrics_params)
-        else:
-            metrics_params = [project_id, current_year] + metrics_params
-            bem_query_promise(f"""
-                INSERT INTO {MANAGER_METRICS_TABLE} 
-                (project_id, reporting_year, capacity_gain_value, capacity_gain_pct, dl_value, dl_equivalent, idl_value, idl_fte, yield_value, yield_gain_pct, quality_value, quality_cases)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, metrics_params)
-
-        comment_text = normalize_text(data.get('comment'))
-        if comment_text is not None:
-            existing_comment = bem_query_promise(f"SELECT comment_id FROM {MANAGER_COMMENTS_TABLE} WHERE project_id = %s ORDER BY created_at DESC LIMIT 1", [project_id])
-            if existing_comment:
-                bem_query_promise(f"UPDATE {MANAGER_COMMENTS_TABLE} SET comment_text = %s WHERE comment_id = %s", [comment_text, existing_comment[0]['comment_id']])
-            else:
-                bem_query_promise(f"INSERT INTO {MANAGER_COMMENTS_TABLE} (project_id, comment_text) VALUES (%s, %s)", [project_id, comment_text])
+                # 4. Update Comments
+                comment_text = normalize_text(data.get('comment'))
+                if comment_text is not None:
+                    cursor.execute(f"SELECT comment_id FROM {MANAGER_COMMENTS_TABLE} WHERE project_id = %s ORDER BY created_at DESC LIMIT 1", [project_id])
+                    existing_comment = cursor.fetchall()
+                    if existing_comment:
+                        cursor.execute(f"UPDATE {MANAGER_COMMENTS_TABLE} SET comment_text = %s WHERE comment_id = %s", [comment_text, existing_comment[0]['comment_id']])
+                    else:
+                        cursor.execute(f"INSERT INTO {MANAGER_COMMENTS_TABLE} (project_id, comment_text) VALUES (%s, %s)", [project_id, comment_text])
 
         return jsonify({"message": "Project updated successfully."}), 200
 
@@ -1055,7 +1085,7 @@ def get_project_master_history(project_code):
 def get_project_values_history_all():
     try:
         rows = query_promise(f"""
-            SELECT history_id, metric_id, project_code, DATE_FORMAT(week_end, '%Y-%m-%d') AS week_end,
+            SELECT history_id, metric_id, project_code, DATE_FORMAT(month_end, '%Y-%m-%d') AS month_end,
                    capacity_improvement, yield_savings, people_productivity, quality_improvement,
                    changed_by, DATE_FORMAT(changed_at, '%Y-%m-%d %H:%i:%s') AS changed_at, action_type
             FROM {HISTORY_TABLE} ORDER BY changed_at DESC
@@ -1069,7 +1099,7 @@ def get_project_values_history_all():
 def get_project_values_history(metric_id):
     try:
         rows = query_promise(f"""
-            SELECT history_id, metric_id, project_code, DATE_FORMAT(week_end, '%Y-%m-%d') AS week_end,
+            SELECT history_id, metric_id, project_code, DATE_FORMAT(month_end, '%Y-%m-%d') AS month_end,
                    capacity_improvement, yield_savings, people_productivity, quality_improvement,
                    changed_by, DATE_FORMAT(changed_at, '%Y-%m-%d %H:%i:%s') AS changed_at, action_type
             FROM {HISTORY_TABLE} WHERE metric_id = %s ORDER BY changed_at DESC
