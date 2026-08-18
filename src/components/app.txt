@@ -1,4 +1,9 @@
 import os
+from dotenv import load_dotenv
+
+# Load variables from the local .env file before doing anything else
+load_dotenv()
+
 import jwt
 import pymysql
 import pandas as pd
