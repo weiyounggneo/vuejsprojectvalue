@@ -1,94 +1,103 @@
 import os
+import time
 from dotenv import load_dotenv
+from databricks import sql
 
 # 1. Force Python to OVERRIDE Databricks system variables with your .env file
 basedir = os.path.abspath(os.path.dirname(__file__))
 load_dotenv(os.path.join(basedir, '.env'), override=True)
 
 import jwt
-import pymysql
 import pandas as pd
 from functools import wraps
-from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from flask import Flask, request, jsonify, send_from_directory
-from ldap3 import Server, Connection, ALL
 
 app = Flask(__name__, static_folder="dist")
 
 # =====================================
 # CONFIGURATION & ENV VARIABLES
 # =====================================
-# =====================================
-# CONFIGURATION & ENV VARIABLES
-# =====================================
-JWT_SECRET = os.environ.get("JWT_SECRET", "fallback_secret_for_local_dev")
-
-# Add the extra empty .strip() to utterly destroy all hidden Windows carriage returns (\r)
-LDAP_HOST = os.environ.get("LDAP_HOST", "").strip().strip(' "\'')
-LDAP_PORT = int(os.environ.get("LDAP_PORT", 389))
-BASE_DN = os.environ.get("LDAP_BASE_DN", "").strip().strip(' "\'')
-
-# Also protect your optional bind credentials just in case!
-LDAP_BIND_DN = os.environ.get("LDAP_BIND_DN", "").strip().strip(' "\'') if os.environ.get("LDAP_BIND_DN") else None
-LDAP_BIND_PASSWORD = os.environ.get("LDAP_BIND_PASSWORD", "").strip().strip(' "\'') if os.environ.get("LDAP_BIND_PASSWORD") else None
-print(f"--- STARTUP CHECK: LDAP_HOST is '{LDAP_HOST}', PORT is {LDAP_PORT} ---")
-
-PROJECT_MASTER_TABLE = os.environ.get("PROJECT_MASTER_TABLE", "t_project_master")
-PROJECT_VALUES_TABLE = os.environ.get("PROJECT_VALUES_TABLE", "t_project_values")
-ACCESS_TABLE = os.environ.get("ACCESS_TABLE", "t_project_access")
-HISTORY_TABLE = "t_project_values_history"
-MASTER_HISTORY_TABLE = "t_project_master_history"
-
-# BEM Database Tables
-MANAGER_PROJECTS_TABLE = "t_manager_project_master"
-MANAGER_YEARLY_TABLE = "t_manager_yearly_savings"
-MANAGER_METRICS_TABLE = "t_manager_metrics"
-MANAGER_COMMENTS_TABLE = "t_manager_comments"
-MANAGER_HISTORY_TABLE = "t_manager_history"
-MANAGER_SITE_TARGETS_TABLE = "t_manager_site_targets"
-MANAGER_PHASES_TABLE = "t_manager_project_phases"
+JWT_SECRET = os.environ.get("JWT_SECRET", "fallback_secret_for_local_dev").strip().strip(' "\'')
 
 # =====================================
-# DATABASE HELPERS 
+# DEMO USER DICTIONARY
 # =====================================
-def get_db_connection(is_bem=False):
-    return pymysql.connect(
-        host=os.environ.get("DB_HOST"),
-        user=os.environ.get("BEM_DB_USER") if is_bem else os.environ.get("DB_USER"),
-        password=os.environ.get("BEM_DB_PASSWORD") if is_bem else os.environ.get("DB_PASSWORD"),
-        database=os.environ.get("BEM_DB_NAME") if is_bem else os.environ.get("DB_NAME"),
-        port=int(os.environ.get("DB_PORT", 3306)),
-        cursorclass=pymysql.cursors.DictCursor
-    )
 
-def query_promise(sql, params=None, is_bem=False):
-    connection = get_db_connection(is_bem)
+VALID_USERS = {
+    "admin": {"password": "stmicro2026", "role": "admin"},
+    "john_doe": {"password": "demo123", "role": "user"},
+    "jane_smith": {"password": "secure456", "role": "user"}
+}
+
+# =====================================
+# UNITY CATALOG DEFAULT STRUCTURE
+# =====================================
+# Change these variables in your Databricks Environment settings, or default to standard locations
+CATALOG = os.environ.get("DATABRICKS_CATALOG", "hive_metastore")
+SCHEMA = os.environ.get("DATABRICKS_SCHEMA", "default")
+PREFIX = f"{CATALOG}.{SCHEMA}"
+
+# Standard Tables mapped to Unity Catalog
+PROJECT_MASTER_TABLE = f"{PREFIX}.t_project_master"
+PROJECT_VALUES_TABLE = f"{PREFIX}.t_project_values"
+HISTORY_TABLE = f"{PREFIX}.t_project_values_history"
+MASTER_HISTORY_TABLE = f"{PREFIX}.t_project_master_history"
+
+# BEM Database Tables mapped to Unity Catalog
+MANAGER_PROJECTS_TABLE = f"{PREFIX}.t_manager_project_master"
+MANAGER_YEARLY_TABLE = f"{PREFIX}.t_manager_yearly_savings"
+MANAGER_METRICS_TABLE = f"{PREFIX}.t_manager_metrics"
+MANAGER_COMMENTS_TABLE = f"{PREFIX}.t_manager_comments"
+MANAGER_HISTORY_TABLE = f"{PREFIX}.t_manager_history"
+MANAGER_SITE_TARGETS_TABLE = f"{PREFIX}.t_manager_site_targets"
+MANAGER_PHASES_TABLE = f"{PREFIX}.t_manager_project_phases"
+
+# =====================================
+# DATABRICKS SQL HELPERS 
+# =====================================
+from databricks import sql
+from databricks.sdk.core import Config
+import os
+
+def query_promise(query, params=None, is_bem=False):
+    """Executes a query using native Databricks App OAuth credentials."""
+    http_path = os.environ.get("DATABRICKS_HTTP_PATH")
+
+    if not http_path:
+        raise Exception("Missing DATABRICKS_HTTP_PATH in environment.")
+
+    # The SDK automatically detects the App's hidden Service Principal identity
+    cfg = Config()
+
+    if params and "%s" in query:
+        query = query.replace("%s", "?")
+
     try:
-        with connection.cursor() as cursor:
-            cursor.execute(sql, params or ())
-            if sql.strip().upper().startswith("SELECT") or sql.strip().upper().startswith("SHOW"):
-                return cursor.fetchall()
-            connection.commit()
-            return {"affectedRows": cursor.rowcount, "insertId": cursor.lastrowid}
-    finally:
-        connection.close()
-
-def bem_query_promise(sql, params=None):
-    return query_promise(sql, params, is_bem=True)
-
-@contextmanager
-def transaction_scope(is_bem=False):
-    """Provides an atomic transactional scope for multi-query operations."""
-    connection = get_db_connection(is_bem)
-    try:
-        yield connection
-        connection.commit()
+        # Pass the OAuth credentials directly into the SQL Connector
+        with sql.connect(
+            server_hostname=cfg.host,
+            http_path=http_path,
+            credentials_provider=lambda: cfg.authenticate
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query, params or [])
+                
+                if query.strip().upper().startswith("SELECT") or query.strip().upper().startswith("SHOW"):
+                    columns = [desc[0] for desc in cursor.description]
+                    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+                
+                return []
     except Exception as e:
-        connection.rollback()
+        print(f"Databricks SQL Error: {str(e)}")
         raise e
-    finally:
-        connection.close()
+
+def bem_query_promise(query, params=None):
+    return query_promise(query, params)
+
+def bem_query_promise(query, params=None):
+    """Router for BEM specific queries - exact same executor for Unity Catalog"""
+    return query_promise(query, params, is_bem=True)
 
 # =====================================
 # DATA NORMALIZATION HELPERS
@@ -149,7 +158,10 @@ def require_admin(f):
         return f(*args, **kwargs)
     return decorated
 
-
+# ==========================================
+# AUTHENTICATION ROUTE
+# ==========================================
+@app.route('/api/login', methods=['POST'])
 # ==========================================
 # AUTHENTICATION ROUTE
 # ==========================================
@@ -163,105 +175,71 @@ def login():
         return jsonify({"success": False, "message": "Username and password are required."}), 400
 
     try:
-        # 1. Safely pass the host and port
-        if username == "admin" and password == "stmicro2026":
-            expiration = datetime.now(timezone.utc) + timedelta(hours=12)
-            token = jwt.encode(
-                {"username": "admin", "access_right": "admin", "exp": expiration},
-                JWT_SECRET, algorithm="HS256"
-            )
-            return jsonify({
-                "success": True, 
-                "message": "Demo admin login successful.", 
-                "token": token, 
-                "access_right": "admin"
-            })
-        server = Server(LDAP_HOST, port=LDAP_PORT, get_info=ALL)
-        
-        # 2. Bind and Search
-        if LDAP_BIND_DN and LDAP_BIND_PASSWORD:
-            conn = Connection(server, user=LDAP_BIND_DN, password=LDAP_BIND_PASSWORD, auto_bind=True)
-        else:
-            conn = Connection(server, auto_bind=True)
-            
-        search_filter = f"(uid={username})"
-        conn.search(BASE_DN, search_filter, attributes=['dn'])
-        
-        if not conn.entries:
-            return jsonify({"success": False, "message": "User not found."}), 401
-            
-        user_dn = conn.entries[0].entry_dn
-        
-        # 3. Authenticate User Password
-        user_conn = Connection(server, user=user_dn, password=password)
-        if not user_conn.bind():
+        # 1. Validate against our nested dictionary
+        if username not in VALID_USERS or VALID_USERS[username]["password"] != password:
             return jsonify({"success": False, "message": "Invalid username or password."}), 401
             
-        # 4. Build Session
-        results = query_promise(f"SELECT access_right FROM {ACCESS_TABLE} WHERE username = %s", [username])
-        access_right = results[0]['access_right'] if results else ''
+        # 2. Fetch their Access Right instantly from the dictionary (No DB query!)
+        access_right = VALID_USERS[username]["role"]
         
-        expiration = datetime.now(timezone.utc) + timedelta(hours=4)
+        # 3. Build the JWT Session Token
+        expiration_timestamp = int(time.time()) + (12 * 3600)
+        
         token = jwt.encode(
-            {"username": username, "access_right": access_right, "exp": expiration},
+            {"username": username, "access_right": access_right, "exp": expiration_timestamp},
             JWT_SECRET,
             algorithm="HS256"
         )
         
         return jsonify({
             "success": True, 
-            "message": "LDAP authentication successful.", 
+            "message": "Login successful.", 
             "token": token, 
             "access_right": access_right
         })
         
     except Exception as e:
-        # This will pipe the exact Host and Port variables straight to your Vue popup!
-        error_msg = f"LDAP Error: {str(e)} | Worker thread saw Host: [{LDAP_HOST}] on Port: [{LDAP_PORT}]"
-        print(error_msg)
-        return jsonify({"success": False, "message": error_msg}), 500
+        print(f"Login Error: {str(e)}")
+        return jsonify({"success": False, "message": f"Login failed: {str(e)}"}), 500
 
 @app.route('/api/check-auth', methods=['GET'])
 @authenticate_token
 def check_auth():
     return jsonify({"loggedIn": True, "user": request.user})
 
-
 # ==========================================
 # DROPDOWNS & CONFIG ROUTES
 # ==========================================
-def get_table_columns(table_name, db_name=None):
-    db_to_use = db_name or os.environ.get("DB_NAME")
-    sql = """
-        SELECT COLUMN_NAME
-        FROM information_schema.COLUMNS
-        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
-        ORDER BY ORDINAL_POSITION
-    """
-    rows = query_promise(sql, [db_to_use, table_name])
-    return [r['COLUMN_NAME'] for r in rows]
+def get_table_columns(table_name):
+    # Safe way to extract column metadata in Unity Catalog without schema mapping errors
+    try:
+        host = os.environ.get("DATABRICKS_HOST")
+        token = os.environ.get("DATABRICKS_TOKEN")
+        http_path = os.environ.get("DATABRICKS_HTTP_PATH")
+        
+        with sql.connect(server_hostname=host, http_path=http_path, access_token=token) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(f"SELECT * FROM {table_name} LIMIT 0")
+                return [desc[0] for desc in cursor.description]
+    except Exception as e:
+        print(f"Error getting columns for {table_name}: {e}")
+        return []
 
 @app.route('/api/project-master/columns', methods=['GET'])
 @authenticate_token
 def get_project_master_columns():
-    try:
-        return jsonify(get_table_columns(PROJECT_MASTER_TABLE))
-    except Exception as e:
-        return jsonify({"message": str(e)}), 500
+    return jsonify(get_table_columns(PROJECT_MASTER_TABLE))
 
 @app.route('/api/project-values/columns', methods=['GET'])
 @authenticate_token
 def get_project_values_columns():
-    try:
-        return jsonify(get_table_columns(PROJECT_VALUES_TABLE))
-    except Exception as e:
-        return jsonify({"message": str(e)}), 500
+    return jsonify(get_table_columns(PROJECT_VALUES_TABLE))
 
 @app.route('/api/project-statuses', methods=['GET'])
 @authenticate_token
 def get_project_statuses():
     try:
-        rows = query_promise("SELECT status_name FROM t_project_statuses ORDER BY status_name ASC")
+        rows = query_promise(f"SELECT status_name FROM {PREFIX}.t_project_statuses ORDER BY status_name ASC")
         return jsonify([r['status_name'] for r in rows])
     except Exception as e:
         return jsonify({"message": str(e)}), 500
@@ -284,11 +262,10 @@ def get_project_options():
 @authenticate_token
 def get_project_types():
     try:
-        rows = query_promise("SELECT type_name FROM t_project_types ORDER BY type_name ASC")
+        rows = query_promise(f"SELECT type_name FROM {PREFIX}.t_project_types ORDER BY type_name ASC")
         return jsonify([r['type_name'] for r in rows])
     except Exception as e:
         return jsonify({"message": str(e)}), 500
-
 
 # ==========================================
 # MAIN DATA TABLES (GET)
@@ -401,7 +378,6 @@ def get_manager_yearly():
         print(f"Error loading manager yearly: {str(e)}")
         return jsonify({"message": str(e)}), 500
 
-
 # ==========================================
 # PROJECT VALUES DATA ENTRY
 # ==========================================
@@ -433,9 +409,9 @@ def create_project_value():
             [project['project_code'], month_end]
         )
         if existing:
-            return jsonify({"message": f"Data for {project['project_name']} on month ending {month_end} already exists. Please select it from the table and click 'Update' instead."}), 409
+            return jsonify({"message": f"Data for {project['project_name']} on month ending {month_end} already exists."}), 409
 
-        result = query_promise(f"""
+        query_promise(f"""
             INSERT INTO {PROJECT_VALUES_TABLE}
             (project_code, month_end, capacity_improvement, people_productivity, quality_improvement, yield_savings)
             VALUES (%s, %s, %s, %s, %s, %s)
@@ -447,15 +423,18 @@ def create_project_value():
             normalize_number(data.get('yield_savings'))
         ])
 
+        # Databricks Safe: Fetch newly created row via unique code + date pair
         new_row = query_promise(f"""
             SELECT v.metric_id, v.project_code, m.project_name, m.project_type, m.project_description, m.project_status, m.use_case_investment,
                    DATE_FORMAT(v.month_end, '%Y-%m-%d') AS month_end, v.capacity_improvement, v.people_productivity, v.quality_improvement, v.yield_savings
             FROM {PROJECT_VALUES_TABLE} v
             LEFT JOIN {PROJECT_MASTER_TABLE} m ON v.project_code = m.project_code
-            WHERE v.metric_id = %s
-        """, [result['insertId']])
+            WHERE v.project_code = %s AND v.month_end = %s
+        """, [project['project_code'], month_end])
 
-        return jsonify(new_row[0]), 201
+        if new_row:
+            return jsonify(new_row[0]), 201
+        return jsonify({"message": "Insert successful, but failed to retrieve row."}), 201
 
     except Exception as e:
         return jsonify({"message": str(e)}), 500
@@ -632,7 +611,6 @@ def import_project_values():
         print(f"Excel Error: {str(e)}")
         return jsonify({"message": str(e) or 'Excel import failed.'}), 500
 
-
 # ==========================================
 # PROJECT MASTER DATA ENTRY
 # ==========================================
@@ -717,6 +695,11 @@ def update_project_master(project_code):
         if validation_error:
             return jsonify({"message": validation_error}), 400
 
+        # Safety Check: Verify project actually exists before trying to log history
+        check = query_promise(f"SELECT project_code FROM {PROJECT_MASTER_TABLE} WHERE project_code = %s", [project_code])
+        if not check:
+            return jsonify({"message": "Project not found."}), 404
+
         duplicate = query_promise(f"""
             SELECT project_code FROM {PROJECT_MASTER_TABLE} 
             WHERE (project_code = %s OR project_name = %s) AND project_code != %s LIMIT 1
@@ -733,7 +716,7 @@ def update_project_master(project_code):
             FROM {PROJECT_MASTER_TABLE} WHERE project_code = %s
         """, [current_user, project_code])
 
-        result = query_promise(f"""
+        query_promise(f"""
             UPDATE {PROJECT_MASTER_TABLE}
             SET project_code = %s, project_name = %s, project_description = %s, project_type = %s, use_case_investment = %s, project_status = %s
             WHERE project_code = %s
@@ -741,9 +724,6 @@ def update_project_master(project_code):
             payload['project_code'], payload['project_name'], payload['project_description'], 
             payload['project_type'], payload['use_case_investment'] or 0, payload['project_status'], project_code
         ])
-
-        if result.get('affectedRows') == 0:
-            return jsonify({"message": "Project not found."}), 404
 
         updated_row = query_promise(f"SELECT * FROM {PROJECT_MASTER_TABLE} WHERE project_code = %s", [payload['project_code']])
         return jsonify(updated_row[0]), 200
@@ -756,15 +736,16 @@ def update_project_master(project_code):
 @require_admin
 def delete_project_master(project_code):
     try:
+        check = query_promise(f"SELECT project_code FROM {PROJECT_MASTER_TABLE} WHERE project_code = %s", [project_code])
+        if not check:
+            return jsonify({"message": "Project not found."}), 404
+
         usage = query_promise(f"SELECT COUNT(*) AS cnt FROM {PROJECT_VALUES_TABLE} WHERE project_code = %s", [project_code])
         if usage and usage[0]['cnt'] > 0:
             return jsonify({"message": "Cannot delete project master row because project values already exist for this project."}), 409
 
-        result = query_promise(f"DELETE FROM {PROJECT_MASTER_TABLE} WHERE project_code = %s", [project_code])
+        query_promise(f"DELETE FROM {PROJECT_MASTER_TABLE} WHERE project_code = %s", [project_code])
         
-        if result.get('affectedRows') == 0:
-            return jsonify({"message": "Project not found."}), 404
-
         return jsonify({"message": "Project deleted successfully."}), 200
 
     except Exception as e:
@@ -847,7 +828,6 @@ def import_project_master():
         print(f"Excel Error: {str(e)}")
         return jsonify({"message": str(e) or 'Excel upload failed.'}), 500
 
-
 # ==========================================
 # MANAGER YEARLY DATA ENTRY
 # ==========================================
@@ -915,26 +895,26 @@ def create_manager_yearly():
         if not payload['project_id'] or not payload['project_name']:
             return jsonify({"message": "Project ID and Project Name are required."}), 400
 
-        try:
-            bem_query_promise(f"""
-                INSERT INTO {MANAGER_PROJECTS_TABLE}
-                (project_id, project_name, project_status, pillar, site, current_pmo_gate, dtit_involved, ai_type, foak_noak,
-                 target_g1_date, target_g2_date, target_g3_date, target_closed_date)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, [
-                payload['project_id'], payload['project_name'], payload['project_status'], payload['pillars'], payload['sites'],
-                payload['current_pmo_gate'], payload['dtit_involved'], payload['ai_aa_a_type'], payload['foak_noak'],
-                payload['target_g1_date'], payload['target_g2_date'], payload['target_g3_date'], payload['target_closed_date']
-            ])
-        except pymysql.err.IntegrityError as e:
-            if e.args[0] == 1062: 
-                return jsonify({"message": "Project ID already exists."}), 409
-            raise e
+        # Safe Duplicate Check for Databricks
+        existing = bem_query_promise(f"SELECT project_id FROM {MANAGER_PROJECTS_TABLE} WHERE project_id = %s", [payload['project_id']])
+        if existing:
+            return jsonify({"message": "Project ID already exists."}), 409
+
+        bem_query_promise(f"""
+            INSERT INTO {MANAGER_PROJECTS_TABLE}
+            (project_id, project_name, project_status, pillar, site, current_pmo_gate, dtit_involved, ai_type, foak_noak,
+             target_g1_date, target_g2_date, target_g3_date, target_closed_date)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, [
+            payload['project_id'], payload['project_name'], payload['project_status'], payload['pillars'], payload['sites'],
+            payload['current_pmo_gate'], payload['dtit_involved'], payload['ai_aa_a_type'], payload['foak_noak'],
+            payload['target_g1_date'], payload['target_g2_date'], payload['target_g3_date'], payload['target_closed_date']
+        ])
 
         if payload['project_status']:
             bem_query_promise(f"""
                 INSERT INTO {MANAGER_PHASES_TABLE} (project_id, phase_name, start_date) 
-                VALUES (%s, %s, CURDATE())
+                VALUES (%s, %s, CURRENT_DATE())
             """, [payload['project_id'], payload['project_status']])
 
         return jsonify({"message": "Project created successfully.", "project_id": payload['project_id']}), 201
@@ -960,125 +940,118 @@ def update_manager_yearly(project_id):
         target_closed_date = parse_standard_date(data.get('targetClosedDate'))
         actual_closed_date = parse_standard_date(data.get('actualClosedDate'))
 
-        with transaction_scope(is_bem=True) as conn:
-            with conn.cursor() as cursor:
-                # 0. Get Current State
-                cursor.execute(f"""
-                    SELECT 
-                        p.project_name, p.project_status,
-                        m.capacity_gain_value, m.capacity_gain_pct, m.dl_value, m.dl_equivalent, 
-                        m.idl_value, m.idl_fte, m.yield_value, m.yield_gain_pct, 
-                        m.quality_value, m.quality_cases, 
-                        c.comment_text
-                    FROM {MANAGER_PROJECTS_TABLE} p
-                    LEFT JOIN {MANAGER_METRICS_TABLE} m ON p.project_id = m.project_id AND m.reporting_year = %s
-                    LEFT JOIN {MANAGER_COMMENTS_TABLE} c ON p.project_id = c.project_id
-                    WHERE p.project_id = %s
-                    ORDER BY c.created_at DESC LIMIT 1
-                """, [current_year, project_id])
-                
-                current_state = cursor.fetchall()
+        # Databricks Sequential Auto-Commit Execution 
+        # 0. Get Current State for History Log
+        current_state = bem_query_promise(f"""
+            SELECT 
+                p.project_name, p.project_status,
+                m.capacity_gain_value, m.capacity_gain_pct, m.dl_value, m.dl_equivalent, 
+                m.idl_value, m.idl_fte, m.yield_value, m.yield_gain_pct, 
+                m.quality_value, m.quality_cases, 
+                c.comment_text
+            FROM {MANAGER_PROJECTS_TABLE} p
+            LEFT JOIN {MANAGER_METRICS_TABLE} m ON p.project_id = m.project_id AND m.reporting_year = %s
+            LEFT JOIN {MANAGER_COMMENTS_TABLE} c ON p.project_id = c.project_id
+            WHERE p.project_id = %s
+            ORDER BY c.created_at DESC LIMIT 1
+        """, [current_year, project_id])
 
-                if current_state:
-                    curr = current_state[0]
-                    cursor.execute(f"""
-                        INSERT INTO {MANAGER_HISTORY_TABLE} (
-                            project_id, project_name, project_status, capacity_gain_value, capacity_gain_pct, 
-                            dl_value, dl_equivalent, idl_value, idl_fte, yield_value, yield_gain_pct, 
-                            quality_value, quality_cases, comment_text, changed_by, action_type
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'UPDATE')
-                    """, [
-                        project_id, curr.get('project_name'), curr.get('project_status'), 
-                        curr.get('capacity_gain_value'), curr.get('capacity_gain_pct'),
-                        curr.get('dl_value'), curr.get('dl_equivalent'), curr.get('idl_value'), curr.get('idl_fte'), 
-                        curr.get('yield_value'), curr.get('yield_gain_pct'),
-                        curr.get('quality_value'), curr.get('quality_cases'), curr.get('comment_text'), current_user
-                    ])
+        if current_state:
+            curr = current_state[0]
+            bem_query_promise(f"""
+                INSERT INTO {MANAGER_HISTORY_TABLE} (
+                    project_id, project_name, project_status, capacity_gain_value, capacity_gain_pct, 
+                    dl_value, dl_equivalent, idl_value, idl_fte, yield_value, yield_gain_pct, 
+                    quality_value, quality_cases, comment_text, changed_by, action_type
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'UPDATE')
+            """, [
+                project_id, curr.get('project_name'), curr.get('project_status'), 
+                curr.get('capacity_gain_value'), curr.get('capacity_gain_pct'),
+                curr.get('dl_value'), curr.get('dl_equivalent'), curr.get('idl_value'), curr.get('idl_fte'), 
+                curr.get('yield_value'), curr.get('yield_gain_pct'),
+                curr.get('quality_value'), curr.get('quality_cases'), curr.get('comment_text'), current_user
+            ])
 
-                # 1. Update Project Master (Metadata)
-                if data.get('projectName'):
-                    new_status = normalize_text(data.get('projectStatus'))
-                    cursor.execute(f"""
-                        UPDATE {MANAGER_PROJECTS_TABLE} 
-                        SET project_name = %s, project_status = %s, pillar = %s, site = %s, 
-                            current_pmo_gate = %s, dtit_involved = %s, ai_type = %s, foak_noak = %s,
-                            target_g1_date = %s, actual_g1_date = %s, 
-                            target_g2_date = %s, actual_g2_date = %s, 
-                            target_g3_date = %s, actual_g3_date = %s, 
-                            target_closed_date = %s, actual_closed_date = %s
-                        WHERE project_id = %s
-                    """, [
-                        normalize_text(data.get('projectName')), new_status, 
-                        normalize_text(data.get('pillars')), normalize_text(data.get('sites')),
-                        normalize_text(data.get('currentPmoGate')), normalize_text(data.get('dtitInvolved')), 
-                        normalize_text(data.get('aiAaAType')), normalize_text(data.get('foakNoak')), 
-                        target_g1_date, actual_g1_date, target_g2_date, actual_g2_date,
-                        target_g3_date, actual_g3_date, target_closed_date, actual_closed_date,
-                        project_id
-                    ])
+        # 1. Update Project Master (Metadata)
+        if data.get('projectName'):
+            new_status = normalize_text(data.get('projectStatus'))
+            bem_query_promise(f"""
+                UPDATE {MANAGER_PROJECTS_TABLE} 
+                SET project_name = %s, project_status = %s, pillar = %s, site = %s, 
+                    current_pmo_gate = %s, dtit_involved = %s, ai_type = %s, foak_noak = %s,
+                    target_g1_date = %s, actual_g1_date = %s, 
+                    target_g2_date = %s, actual_g2_date = %s, 
+                    target_g3_date = %s, actual_g3_date = %s, 
+                    target_closed_date = %s, actual_closed_date = %s
+                WHERE project_id = %s
+            """, [
+                normalize_text(data.get('projectName')), new_status, 
+                normalize_text(data.get('pillars')), normalize_text(data.get('sites')),
+                normalize_text(data.get('currentPmoGate')), normalize_text(data.get('dtitInvolved')), 
+                normalize_text(data.get('aiAaAType')), normalize_text(data.get('foakNoak')), 
+                target_g1_date, actual_g1_date, target_g2_date, actual_g2_date,
+                target_g3_date, actual_g3_date, target_closed_date, actual_closed_date,
+                project_id
+            ])
 
-                    # Automate Actual Phase Tracking
-                    old_status = current_state[0].get('project_status') if current_state else None
-                    if old_status != new_status and new_status:
-                        cursor.execute(f"UPDATE {MANAGER_PHASES_TABLE} SET end_date = CURDATE() WHERE project_id = %s AND end_date IS NULL", [project_id])
-                        cursor.execute(f"INSERT INTO {MANAGER_PHASES_TABLE} (project_id, phase_name, start_date) VALUES (%s, %s, CURDATE())", [project_id, new_status])
+            # Automate Actual Phase Tracking
+            old_status = current_state[0].get('project_status') if current_state else None
+            if old_status != new_status and new_status:
+                bem_query_promise(f"UPDATE {MANAGER_PHASES_TABLE} SET end_date = CURRENT_DATE() WHERE project_id = %s AND end_date IS NULL", [project_id])
+                bem_query_promise(f"INSERT INTO {MANAGER_PHASES_TABLE} (project_id, phase_name, start_date) VALUES (%s, %s, CURRENT_DATE())", [project_id, new_status])
 
-                # 2. Update Yearly Savings safely
-                year_keys = [k for k in data.keys() if k.startswith('year') and len(k) == 8]
-                for key in year_keys:
-                    year = int(key.replace('year', ''))
-                    val = normalize_number(data.get(key))
-                    if val is not None:
-                        cursor.execute(f"SELECT project_id FROM {MANAGER_YEARLY_TABLE} WHERE project_id = %s AND savings_year = %s LIMIT 1", [project_id, year])
-                        if cursor.fetchall():
-                            cursor.execute(f"UPDATE {MANAGER_YEARLY_TABLE} SET savings_value = %s WHERE project_id = %s AND savings_year = %s", [val, project_id, year])
-                        else:
-                            cursor.execute(f"INSERT INTO {MANAGER_YEARLY_TABLE} (project_id, savings_year, savings_value) VALUES (%s, %s, %s)", [project_id, year, val])
-
-                # 3. Update Metrics (KPIs)
-                cursor.execute(f"SELECT metrics_id FROM {MANAGER_METRICS_TABLE} WHERE project_id = %s AND reporting_year = %s LIMIT 1", [project_id, current_year])
-                existing_metric = cursor.fetchall()
-
-                metrics_params = [
-                    normalize_number(data.get('capacityGainValue')), normalize_number(data.get('capacityGainPercent')),
-                    normalize_number(data.get('dlValue')), normalize_number(data.get('dlEquivalent')),
-                    normalize_number(data.get('idlValue')), normalize_number(data.get('idlFte')),
-                    normalize_number(data.get('yieldValue')), normalize_number(data.get('yieldPercentGain')),
-                    normalize_number(data.get('qualityValue')), normalize_number(data.get('qualityCases'))
-                ]
-                
-                if existing_metric:
-                    metrics_params.append(existing_metric[0]['metrics_id'])
-                    cursor.execute(f"""
-                        UPDATE {MANAGER_METRICS_TABLE} SET 
-                        capacity_gain_value=%s, capacity_gain_pct=%s, dl_value=%s, dl_equivalent=%s, 
-                        idl_value=%s, idl_fte=%s, yield_value=%s, yield_gain_pct=%s, quality_value=%s, quality_cases=%s 
-                        WHERE metrics_id=%s
-                    """, metrics_params)
+        # 2. Update Yearly Savings
+        year_keys = [k for k in data.keys() if k.startswith('year') and len(k) == 8]
+        for key in year_keys:
+            year = int(key.replace('year', ''))
+            val = normalize_number(data.get(key))
+            if val is not None:
+                existing_yearly = bem_query_promise(f"SELECT project_id FROM {MANAGER_YEARLY_TABLE} WHERE project_id = %s AND savings_year = %s LIMIT 1", [project_id, year])
+                if existing_yearly:
+                    bem_query_promise(f"UPDATE {MANAGER_YEARLY_TABLE} SET savings_value = %s WHERE project_id = %s AND savings_year = %s", [val, project_id, year])
                 else:
-                    metrics_params = [project_id, current_year] + metrics_params
-                    cursor.execute(f"""
-                        INSERT INTO {MANAGER_METRICS_TABLE} 
-                        (project_id, reporting_year, capacity_gain_value, capacity_gain_pct, dl_value, dl_equivalent, idl_value, idl_fte, yield_value, yield_gain_pct, quality_value, quality_cases)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """, metrics_params)
+                    bem_query_promise(f"INSERT INTO {MANAGER_YEARLY_TABLE} (project_id, savings_year, savings_value) VALUES (%s, %s, %s)", [project_id, year, val])
 
-                # 4. Update Comments
-                comment_text = normalize_text(data.get('comment'))
-                if comment_text is not None:
-                    cursor.execute(f"SELECT comment_id FROM {MANAGER_COMMENTS_TABLE} WHERE project_id = %s ORDER BY created_at DESC LIMIT 1", [project_id])
-                    existing_comment = cursor.fetchall()
-                    if existing_comment:
-                        cursor.execute(f"UPDATE {MANAGER_COMMENTS_TABLE} SET comment_text = %s WHERE comment_id = %s", [comment_text, existing_comment[0]['comment_id']])
-                    else:
-                        cursor.execute(f"INSERT INTO {MANAGER_COMMENTS_TABLE} (project_id, comment_text) VALUES (%s, %s)", [project_id, comment_text])
+        # 3. Update Metrics (KPIs)
+        existing_metric = bem_query_promise(f"SELECT metrics_id FROM {MANAGER_METRICS_TABLE} WHERE project_id = %s AND reporting_year = %s LIMIT 1", [project_id, current_year])
+        metrics_params = [
+            normalize_number(data.get('capacityGainValue')), normalize_number(data.get('capacityGainPercent')),
+            normalize_number(data.get('dlValue')), normalize_number(data.get('dlEquivalent')),
+            normalize_number(data.get('idlValue')), normalize_number(data.get('idlFte')),
+            normalize_number(data.get('yieldValue')), normalize_number(data.get('yieldPercentGain')),
+            normalize_number(data.get('qualityValue')), normalize_number(data.get('qualityCases'))
+        ]
+        
+        if existing_metric:
+            metrics_params.append(existing_metric[0]['metrics_id'])
+            bem_query_promise(f"""
+                UPDATE {MANAGER_METRICS_TABLE} SET 
+                capacity_gain_value=%s, capacity_gain_pct=%s, dl_value=%s, dl_equivalent=%s, 
+                idl_value=%s, idl_fte=%s, yield_value=%s, yield_gain_pct=%s, quality_value=%s, quality_cases=%s 
+                WHERE metrics_id=%s
+            """, metrics_params)
+        else:
+            metrics_params = [project_id, current_year] + metrics_params
+            bem_query_promise(f"""
+                INSERT INTO {MANAGER_METRICS_TABLE} 
+                (project_id, reporting_year, capacity_gain_value, capacity_gain_pct, dl_value, dl_equivalent, idl_value, idl_fte, yield_value, yield_gain_pct, quality_value, quality_cases)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, metrics_params)
+
+        # 4. Update Comments
+        comment_text = normalize_text(data.get('comment'))
+        if comment_text is not None:
+            existing_comment = bem_query_promise(f"SELECT comment_id FROM {MANAGER_COMMENTS_TABLE} WHERE project_id = %s ORDER BY created_at DESC LIMIT 1", [project_id])
+            if existing_comment:
+                bem_query_promise(f"UPDATE {MANAGER_COMMENTS_TABLE} SET comment_text = %s WHERE comment_id = %s", [comment_text, existing_comment[0]['comment_id']])
+            else:
+                bem_query_promise(f"INSERT INTO {MANAGER_COMMENTS_TABLE} (project_id, comment_text) VALUES (%s, %s)", [project_id, comment_text])
 
         return jsonify({"message": "Project updated successfully."}), 200
 
     except Exception as e:
         print(f"Error updating project: {str(e)}")
         return jsonify({"message": str(e)}), 500
-
 
 # ==========================================
 # HISTORY LOGS
@@ -1172,7 +1145,6 @@ def get_manager_yearly_history(project_id):
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 
-
 # ==========================================
 # VUE.JS FRONTEND ROUTES (The Catch-All)
 # ==========================================
@@ -1186,7 +1158,6 @@ def static_files(path):
         return send_from_directory("dist", path)
     except Exception:
         return send_from_directory("dist", "index.html")
-
 
 # ==========================================
 # SERVER STARTUP
