@@ -2,6 +2,7 @@ import os
 import time
 from dotenv import load_dotenv
 from databricks import sql
+from databricks.sdk.core import Config
 
 # 1. Force Python to OVERRIDE Databricks system variables with your .env file
 basedir = os.path.abspath(os.path.dirname(__file__))
@@ -23,7 +24,6 @@ JWT_SECRET = os.environ.get("JWT_SECRET", "fallback_secret_for_local_dev").strip
 # =====================================
 # DEMO USER DICTIONARY
 # =====================================
-
 VALID_USERS = {
     "admin": {"password": "stmicro2026", "role": "admin"},
     "john_doe": {"password": "demo123", "role": "user"},
@@ -56,10 +56,6 @@ MANAGER_PHASES_TABLE = f"{PREFIX}.t_manager_project_phases"
 # =====================================
 # DATABRICKS SQL HELPERS 
 # =====================================
-from databricks import sql
-from databricks.sdk.core import Config
-import os
-
 def query_promise(query, params=None, is_bem=False):
     """Executes a query using native Databricks App OAuth credentials."""
     http_path = os.environ.get("DATABRICKS_HTTP_PATH")
@@ -91,9 +87,6 @@ def query_promise(query, params=None, is_bem=False):
     except Exception as e:
         print(f"Databricks SQL Error: {str(e)}")
         raise e
-
-def bem_query_promise(query, params=None):
-    return query_promise(query, params)
 
 def bem_query_promise(query, params=None):
     """Router for BEM specific queries - exact same executor for Unity Catalog"""
@@ -134,7 +127,8 @@ def get_current_user(req):
 def authenticate_token(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        auth_header = request.headers.get("Authorization")
+        # Sneak past the Databricks proxy by using our custom header!
+        auth_header = request.headers.get("X-Custom-Auth") 
         if not auth_header or not auth_header.startswith("Bearer "):
             return jsonify({"message": "No token provided."}), 401
         
@@ -162,10 +156,6 @@ def require_admin(f):
 # AUTHENTICATION ROUTE
 # ==========================================
 @app.route('/api/login', methods=['POST'])
-# ==========================================
-# AUTHENTICATION ROUTE
-# ==========================================
-@app.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
     username = data.get('username')
@@ -179,7 +169,7 @@ def login():
         if username not in VALID_USERS or VALID_USERS[username]["password"] != password:
             return jsonify({"success": False, "message": "Invalid username or password."}), 401
             
-        # 2. Fetch their Access Right instantly from the dictionary (No DB query!)
+        # 2. Fetch their Access Right instantly from the dictionary
         access_right = VALID_USERS[username]["role"]
         
         # 3. Build the JWT Session Token
@@ -211,13 +201,16 @@ def check_auth():
 # DROPDOWNS & CONFIG ROUTES
 # ==========================================
 def get_table_columns(table_name):
-    # Safe way to extract column metadata in Unity Catalog without schema mapping errors
+    """Safe way to extract column metadata natively without manual tokens."""
     try:
-        host = os.environ.get("DATABRICKS_HOST")
-        token = os.environ.get("DATABRICKS_TOKEN")
         http_path = os.environ.get("DATABRICKS_HTTP_PATH")
+        cfg = Config()
         
-        with sql.connect(server_hostname=host, http_path=http_path, access_token=token) as connection:
+        with sql.connect(
+            server_hostname=cfg.host, 
+            http_path=http_path, 
+            credentials_provider=lambda: cfg.authenticate
+        ) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(f"SELECT * FROM {table_name} LIMIT 0")
                 return [desc[0] for desc in cursor.description]
@@ -423,7 +416,6 @@ def create_project_value():
             normalize_number(data.get('yield_savings'))
         ])
 
-        # Databricks Safe: Fetch newly created row via unique code + date pair
         new_row = query_promise(f"""
             SELECT v.metric_id, v.project_code, m.project_name, m.project_type, m.project_description, m.project_status, m.use_case_investment,
                    DATE_FORMAT(v.month_end, '%Y-%m-%d') AS month_end, v.capacity_improvement, v.people_productivity, v.quality_improvement, v.yield_savings
@@ -695,7 +687,6 @@ def update_project_master(project_code):
         if validation_error:
             return jsonify({"message": validation_error}), 400
 
-        # Safety Check: Verify project actually exists before trying to log history
         check = query_promise(f"SELECT project_code FROM {PROJECT_MASTER_TABLE} WHERE project_code = %s", [project_code])
         if not check:
             return jsonify({"message": "Project not found."}), 404
@@ -895,7 +886,6 @@ def create_manager_yearly():
         if not payload['project_id'] or not payload['project_name']:
             return jsonify({"message": "Project ID and Project Name are required."}), 400
 
-        # Safe Duplicate Check for Databricks
         existing = bem_query_promise(f"SELECT project_id FROM {MANAGER_PROJECTS_TABLE} WHERE project_id = %s", [payload['project_id']])
         if existing:
             return jsonify({"message": "Project ID already exists."}), 409
@@ -940,8 +930,6 @@ def update_manager_yearly(project_id):
         target_closed_date = parse_standard_date(data.get('targetClosedDate'))
         actual_closed_date = parse_standard_date(data.get('actualClosedDate'))
 
-        # Databricks Sequential Auto-Commit Execution 
-        # 0. Get Current State for History Log
         current_state = bem_query_promise(f"""
             SELECT 
                 p.project_name, p.project_status,
@@ -972,7 +960,6 @@ def update_manager_yearly(project_id):
                 curr.get('quality_value'), curr.get('quality_cases'), curr.get('comment_text'), current_user
             ])
 
-        # 1. Update Project Master (Metadata)
         if data.get('projectName'):
             new_status = normalize_text(data.get('projectStatus'))
             bem_query_promise(f"""
@@ -994,13 +981,11 @@ def update_manager_yearly(project_id):
                 project_id
             ])
 
-            # Automate Actual Phase Tracking
             old_status = current_state[0].get('project_status') if current_state else None
             if old_status != new_status and new_status:
                 bem_query_promise(f"UPDATE {MANAGER_PHASES_TABLE} SET end_date = CURRENT_DATE() WHERE project_id = %s AND end_date IS NULL", [project_id])
                 bem_query_promise(f"INSERT INTO {MANAGER_PHASES_TABLE} (project_id, phase_name, start_date) VALUES (%s, %s, CURRENT_DATE())", [project_id, new_status])
 
-        # 2. Update Yearly Savings
         year_keys = [k for k in data.keys() if k.startswith('year') and len(k) == 8]
         for key in year_keys:
             year = int(key.replace('year', ''))
@@ -1012,7 +997,6 @@ def update_manager_yearly(project_id):
                 else:
                     bem_query_promise(f"INSERT INTO {MANAGER_YEARLY_TABLE} (project_id, savings_year, savings_value) VALUES (%s, %s, %s)", [project_id, year, val])
 
-        # 3. Update Metrics (KPIs)
         existing_metric = bem_query_promise(f"SELECT metrics_id FROM {MANAGER_METRICS_TABLE} WHERE project_id = %s AND reporting_year = %s LIMIT 1", [project_id, current_year])
         metrics_params = [
             normalize_number(data.get('capacityGainValue')), normalize_number(data.get('capacityGainPercent')),
@@ -1038,7 +1022,6 @@ def update_manager_yearly(project_id):
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, metrics_params)
 
-        # 4. Update Comments
         comment_text = normalize_text(data.get('comment'))
         if comment_text is not None:
             existing_comment = bem_query_promise(f"SELECT comment_id FROM {MANAGER_COMMENTS_TABLE} WHERE project_id = %s ORDER BY created_at DESC LIMIT 1", [project_id])
