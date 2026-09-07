@@ -1,0 +1,57 @@
+Here is a professional, punchy script designed to be spoken naturally. It totals about **390 words**, which will take exactly **2 to 2.5 minutes** to present at a comfortable, confident speaking pace.
+
+---
+
+### Slide 1: Transforming Incident Response with AIOps
+
+*(Target time: ~30 seconds)*
+
+"Hi everyone. Today I'm excited to share our new automated Root Cause Analysis pipeline.
+
+Currently, when a system like Airflow fails, our engineers spend their first 20 to 30 minutes just doing detective work—digging through logs, searching past tickets, and running basic server checks just to figure out where to start. We built this AIOps pipeline to completely automate that discovery phase.
+
+Now, by the time an engineer even opens a new incident ticket, our system has already researched our past fixes, logged into the servers to gather live evidence, and prepared a verified diagnostic report."
+
+### Slide 2: System Architecture: The Tri-Agent RCA Pipeline
+
+*(Target time: ~35 seconds)*
+
+"Here is a high-level look at how we achieve this using three specialized scripts.
+
+First is the **Orchestrator**. It acts as our traffic cop, constantly monitoring the database queue for new alerts and managing the workflow.
+
+When an alert hits, it triggers the **Proposer**—our analytical brain. The Proposer searches our internal database for how we've fixed this exact issue in the past, and feeds that history to the ST internal LLM to generate a smart hypothesis.
+
+Finally, it hands off to the **Verifier**. The Verifier acts as the hands. It safely connects to our live servers and databases to run read-only checks, physically proving or disproving the AI's theory."
+
+### Slide 3: Secure Execution & Human-in-the-Loop Workflow
+
+*(Target time: ~30 seconds)*
+
+"Security and control are built into the foundation of this tool. The AI does not have a blank check to run commands. The Verifier is strictly sandboxed to execute only pre-approved, read-only checks from our standard operating procedures.
+
+Our near-future vision is a 'Human-in-the-loop' web dashboard. Instead of reading logs, an engineer will open a GUI, review the AI’s verified server evidence, and simply click an 'Approve Remediation' button. The AI does the heavy lifting, but the human always makes the final decision."
+
+### Slide 4: Key Business Outcomes
+
+*(Target time: ~25 seconds)*
+
+"The business impact here is immediate.
+
+First, we dramatically reduce our Mean Time to Resolution by completely automating the manual debugging phase.
+
+Second, we retain institutional memory. If a rare bug was solved two years ago, the system instantly remembers how to fix it today, preventing knowledge loss when team members rotate.
+
+And finally, it reduces alert fatigue. Engineers are no longer spammed with raw stack traces; they get clean, actionable reports."
+
+### Slide 5: Technical Limitations & V2 Engineering Roadmap
+
+*(Target time: ~35 seconds)*
+
+"While this V1 architecture is highly effective, we have already designed the V2 roadmap to handle enterprise scale.
+
+Currently, our orchestrator processes one ticket at a time. In V2, we are decoupling these agents into independent background workers so we can process dozens of alerts concurrently during a major outage.
+
+We are also implementing strict JSON data contracts so the backend can safely reject any unpredictable AI text formats. And finally, we are adding atomic database locking to allow multiple worker nodes to scale up safely without stepping on each other's toes.
+
+Thank you, and I’m happy to take any questions."
