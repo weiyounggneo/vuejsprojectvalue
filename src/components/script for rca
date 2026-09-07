@@ -1,6 +1,3 @@
-Here is a professional, punchy script designed to be spoken naturally. It totals about **390 words**, which will take exactly **2 to 2.5 minutes** to present at a comfortable, confident speaking pace.
-
----
 
 ### Slide 1: Transforming Incident Response with AIOps
 
@@ -8,7 +5,7 @@ Here is a professional, punchy script designed to be spoken naturally. It totals
 
 "Hi everyone. Today I'm excited to share our new automated Root Cause Analysis pipeline.
 
-Currently, when a system like Airflow fails, our engineers spend their first 20 to 30 minutes just doing detective work—digging through logs, searching past tickets, and running basic server checks just to figure out where to start. We built this AIOps pipeline to completely automate that discovery phase.
+Currently, when a system like Airflow fails, our engineers spend a long time digging through logs, searching past tickets, and running basic server checks just to figure out where to start. We built this AIOps pipeline to completely automate that discovery phase.
 
 Now, by the time an engineer even opens a new incident ticket, our system has already researched our past fixes, logged into the servers to gather live evidence, and prepared a verified diagnostic report."
 
@@ -18,9 +15,9 @@ Now, by the time an engineer even opens a new incident ticket, our system has al
 
 "Here is a high-level look at how we achieve this using three specialized scripts.
 
-First is the **Orchestrator**. It acts as our traffic cop, constantly monitoring the database queue for new alerts and managing the workflow.
+First is the **Orchestrator**. It constantly monitors the database queue for new alerts and managing the workflow.
 
-When an alert hits, it triggers the **Proposer**—our analytical brain. The Proposer searches our internal database for how we've fixed this exact issue in the past, and feeds that history to the ST internal LLM to generate a smart hypothesis.
+When an alert hits, it triggers the proposer agent which searches our internal database for how we've fixed this exact issue in the past, and feeds that history to the ST internal LLM to generate a smart hypothesis.
 
 Finally, it hands off to the **Verifier**. The Verifier acts as the hands. It safely connects to our live servers and databases to run read-only checks, physically proving or disproving the AI's theory."
 
@@ -35,8 +32,6 @@ Our near-future vision is a 'Human-in-the-loop' web dashboard. Instead of readin
 ### Slide 4: Key Business Outcomes
 
 *(Target time: ~25 seconds)*
-
-"The business impact here is immediate.
 
 First, we dramatically reduce our Mean Time to Resolution by completely automating the manual debugging phase.
 
