@@ -43,7 +43,7 @@ And finally, it reduces alert fatigue. Engineers are no longer spammed with raw 
 
 *(Target time: ~35 seconds)*
 
-"While this V1 architecture is highly effective, we have already designed the V2 roadmap to handle enterprise scale.
+"RIGHT NOW THIS V1 architecture is JUST A STARTING PT, we have already designed the V2 roadmap to handle enterprise scale.
 
 Currently, our orchestrator processes one ticket at a time. In V2, we are decoupling these agents into independent background workers so we can process dozens of alerts concurrently during a major outage.
 
