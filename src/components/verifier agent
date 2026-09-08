@@ -1,0 +1,346 @@
+import os
+import json
+import socket
+import subprocess
+import requests
+import mysql.connector
+import smbclient
+from smbprotocol.exceptions import SMBException
+from dotenv import load_dotenv
+import paramiko
+
+load_dotenv()
+LLM_URL = os.getenv('LLM_URL')
+
+# ==========================================
+# 1. Local Infrastructure Tools
+# ==========================================
+def ping_server(hostname):
+    """Pings a server to check if it is reachable on the network."""
+    print(f"[*] Executing Tool: ping_server on {hostname}")
+    command = ['ping', '-c', '4', hostname] # Changed to -c for Linux environments
+    try:
+        output = subprocess.check_output(command, stderr=subprocess.STDOUT, universal_newlines=True)
+        return f"SUCCESS: Server {hostname} is reachable."
+    except subprocess.CalledProcessError:
+        return f"FAILED: Server {hostname} is unreachable."
+
+def query_database(query_string, db_prefix="DB"):
+    """Executes a read-only SELECT query on a dynamically selected database."""
+    print(f"[*] Executing Tool: query_database on {db_prefix}_NAME -> {query_string}")
+    
+    # Security check: Only allow SELECT queries
+    if not query_string.strip().upper().startswith("SELECT"):
+        return "FAILED: Security restriction. Only SELECT queries are allowed."
+        
+    # Dynamically fetch credentials (falls back to main RCA DB if specific ones aren't found)
+    host = os.getenv(f"{db_prefix}_HOST") or os.getenv('DB_HOST')
+    port = int(os.getenv(f"{db_prefix}_PORT") or os.getenv('DB_PORT', 3306))
+    user = os.getenv(f"{db_prefix}_USER") or os.getenv('DB_USER')
+    password = os.getenv(f"{db_prefix}_PASS") or os.getenv('DB_PASSWORD')
+    database = os.getenv(f"{db_prefix}_NAME") or os.getenv('DB_NAME')
+        
+    try:
+        conn = mysql.connector.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=database
+        )
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(query_string)
+        results = cursor.fetchall()
+        conn.close()
+        
+        if not results:
+            return "SUCCESS: Query executed, but returned 0 rows."
+            
+        return f"SUCCESS: Extracted Data -> {results[:5]}"
+        
+    except Exception as e:
+        return f"FAILED: Database query failed on {database}. Error: {e}"
+
+def run_ssh_command(hostname, command):
+    """Executes a bash command on a remote Linux server via SSH with dynamic credentials."""
+    print(f"[*] Executing Tool: run_ssh_command on {hostname} -> {command}")
+    
+    # NEW: Check if the target is an IP address or a hostname
+    if hostname[0].isdigit():
+        # IP Address: '10.56.12.34' -> '10_56_12_34'
+        short_name = hostname.replace('.', '_')
+    else:
+        # Hostname: 'kirsx00317.kir.st.com' -> 'KIRSX00317'
+        short_name = hostname.split('.')[0].upper()
+    
+    # Dynamically look up the specific environment variables
+    ssh_user = os.getenv(f"{short_name}_USER")
+    ssh_pass = os.getenv(f"{short_name}_PASS")
+    
+    # If specific credentials don't exist in .env, use the default service account
+    if not ssh_user or not ssh_pass:
+        print(f"[*] Specific credentials for {short_name} not found. Using default account.")
+        ssh_user = os.getenv('DEFAULT_LINUX_USER')
+        ssh_pass = os.getenv('DEFAULT_LINUX_PASS')
+    
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    
+    try:
+        ssh.connect(
+            hostname=hostname,
+            username=ssh_user,
+            password=ssh_pass,
+            timeout=5
+        )
+        stdin, stdout, stderr = ssh.exec_command(command)
+        output = stdout.read().decode().strip()
+        error = stderr.read().decode().strip()
+        
+        ssh.close()
+        
+        if error:
+            return f"FAILED: Command executed but returned error: {error}"
+        return f"SUCCESS: Output -> {output}"
+        
+    except paramiko.AuthenticationException:
+        return f"AUTH_FAILURE: Invalid SSH credentials for {hostname}."
+    except Exception as e:
+        return f"SSH_FAILURE: Could not connect to {hostname}. Error: {e}"
+
+def check_port(hostname, port):
+    """Checks if a specific TCP port is open."""
+    print(f"[*] Executing Tool: check_port on {hostname}:{port}")
+    try:
+        sock = socket.create_connection((hostname, int(port)), timeout=5)
+        sock.close()
+        return f"SUCCESS: Port {port} on {hostname} is open and accepting connections."
+    except Exception as e:
+        return f"FAILED: Port {port} on {hostname} is closed or blocked. Error: {e}"
+
+def verify_smb_connectivity(target_ip):
+    """Tests if the Windows host is reachable over SMB (Port 445) natively from Linux."""
+    print(f"[*] Executing Tool: verify_smb_connectivity on {target_ip}")
+    user = os.getenv('WINDOWS_ADMIN_USER')
+    password = os.getenv('WINDOWS_ADMIN_PASS')
+    try:
+        # If the network or machine is down, this raises an exception immediately
+        smbclient.register_session(target_ip, username=user, password=password, connection_timeout=5)
+        smbclient.delete_session(target_ip)
+        return f"SUCCESS: Windows host {target_ip} is reachable over SMB. Network path is healthy."
+    except SMBException as e:
+        return f"AUTH_ISSUE: Host is reachable, but credentials failed: {e}"
+    except Exception as e:
+        return f"NETWORK_DOWN: Host {target_ip} unreachable over Port 445. Windows mapping is definitively down: {e}"
+
+def verify_ip_reachability(ip_address):
+    """
+    Tests if an IP is online using Ping, with a TCP socket fallback if ICMP is blocked.
+    """
+    print(f"[*] Executing Tool: verify_ip_reachability on {ip_address}")
+    
+    # 1. Try a standard ICMP Ping (Linux format: 2 packets, 2-second timeout)
+    try:
+        subprocess.check_output(['ping', '-c', '2', '-W', '2', ip_address], 
+                                stderr=subprocess.STDOUT, 
+                                universal_newlines=True)
+        return f"SUCCESS: IP {ip_address} is online and responding to Ping."
+    except subprocess.CalledProcessError:
+        pass # Ping failed or is blocked by a firewall. Proceed to TCP fallback.
+        
+    # 2. TCP Fallback: Check if common manufacturing ports are alive
+    # 445 (SMB), 135 (RPC), 5900 (VNC)
+    common_ports = [445, 135, 5900]
+    
+    for port in common_ports:
+        try:
+            sock = socket.create_connection((ip_address, port), timeout=2)
+            sock.close()
+            return f"SUCCESS: IP {ip_address} is online. (Ping is blocked, but Port {port} responded)."
+        except Exception:
+            continue # Try the next port
+            
+    return f"FAILED: IP {ip_address} is completely unreachable via Ping and standard TCP network ports."
+
+def check_http_endpoint(url):
+    """Checks if a REST API or web dashboard is returning a 200 OK status."""
+    print(f"[*] Executing Tool: check_http_endpoint on {url}")
+    try:
+        response = requests.get(url, timeout=5)
+        return f"SUCCESS: Endpoint returned HTTP {response.status_code}"
+    except requests.exceptions.RequestException as e:
+        return f"FAILED: Endpoint {url} is completely unreachable. Error: {e}"
+
+def check_db_connection(target_host, port):
+    """Tests a raw MySQL/TCP connection using existing credentials."""
+    print(f"[*] Executing Tool: check_db_connection on {target_host}:{port}")
+    try:
+        conn = mysql.connector.connect(
+            host=target_host,
+            port=int(port),
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD'),
+            connect_timeout=5
+        )
+        conn.close()
+        return f"SUCCESS: Database at {target_host}:{port} is up and accepting credentials."
+    except Exception as e:
+        return f"FAILED: Database connection failed. Error: {e}"
+        
+def fetch_mlflow_metrics(model_name):
+    """MOCK: Hits the internal ML API to check live model drift."""
+    print(f"[*] Executing Tool: fetch_mlflow_metrics on {model_name}")
+    return f"API SUCCESS: Live data for {model_name} shows average probability of 0.88 (below 0.95 threshold)."
+
+# ==========================================
+# 2. The Verifier Agent Logic (ReAct Loop)
+# ==========================================
+# ==========================================
+# 2. The Verifier Agent Logic (ReAct Loop)
+# ==========================================
+def run_verifier_agent(incident_error_message, proposed_rca, proposed_fix, raw_db_sop):
+    """
+    Runs an iterative investigation loop. The AI can use multiple tools 
+    sequentially based on the SOP before delivering a final Investigative Dossier.
+    """
+    print("\n" + "="*60)
+    print("[*] Starting Verifier Agent (Investigator Mode)")
+    print("="*60)
+
+    investigation_log = ""
+    max_steps = 3  # Prevent infinite loops
+
+    for step in range(1, max_steps + 1):
+        print(f"\n--- Investigation Step {step} ---")
+        
+        api_input = f"""
+        CURRENT INCIDENT LOG:
+        {incident_error_message}
+
+        AI PROPOSED ROOT CAUSE & FIX:
+        {proposed_rca}
+        {proposed_fix}
+
+        STRICT INVESTIGATION SOP (FROM DATABASE):
+        {raw_db_sop}
+
+        INVESTIGATION HISTORY (Evidence gathered so far):
+        {investigation_log if investigation_log else "None. This is step 1."}
+        """
+
+        api_prompt = """
+        You are an Investigative Verifier Agent. Read the SOP, the error, and the Investigation History. Decide if you need to run a tool to gather more evidence, OR if you have enough evidence to output the final conclusion.
+
+        CRITICAL RULES: 
+        1. SEQUENTIAL EXECUTION: You MUST execute the SOP steps in exact chronological order.
+        2. STRICT COMMANDS: If the SOP provides a specific command, execute it EXACTLY as written.
+        3. FINAL REPORTING: When you have finished the SOP, set "is_final": true. You MUST provide a "confidence_score" (1-100) and a list of "completed_steps" summarizing what you actually checked from the SOP.
+        
+        AVAILABLE TOOLS:
+        1. "verify_smb_connectivity" - target (IP).
+        2. "verify_ip_reachability" - target.
+        3. "check_port" - target and port.
+        4. "check_http_endpoint" - target (URL).
+        5. "check_db_connection" - target and port.
+        6. "run_ssh_command" - target (Hostname/IP) and command.
+        7. "fetch_mlflow_metrics" - target (Model Name).
+        8. "query_database" - target (Database Prefix) and query.
+
+        IMPORTANT CONSTRAINT:
+        Return ONLY a valid JSON object. 
+        If you need to use a tool, set "is_final": false.
+        If you have finished, set "is_final": true and fill out the final_report, confidence_score, and completed_steps.
+        Do not use special unicode math symbols like ≤ or ≥. Always use standard keyboard characters like <= and >=.
+        
+        JSON SCHEMA:
+        {
+            "thought": "Explain your logic: what evidence do you have, and what are you doing next?",
+            "is_final": false,
+            "tool": "tool_name",
+            "target": "target_data",
+            "port": 445,
+            "command": "The bash command to run if using run_ssh_command, otherwise leave empty.",
+            "query": "The exact SQL SELECT statement if using query_database, otherwise leave empty.",
+            "confidence_score": 95, 
+            "completed_steps": ["Step 1: Checked SSH process count (Result: 2)", "Step 2: Evaluated outcome as healthy"],
+            "final_report": "If is_final is true, write the final Investigative Dossier."
+        }
+        """
+
+        headers = {"Authorization": "application/json", "Content-Type": "application/json"}
+        payload = {"input": api_input, "prompt": api_prompt}
+
+        try:
+            response = requests.post(LLM_URL, headers=headers, json=payload, timeout=120)
+            if not response.ok:
+                return f"LLM API Failed: {response.status_code}"
+                
+            llm_response = response.json().get("completion", "")
+            command = json.loads(llm_response.strip())
+            
+            print(f"[*] AI Thought: {command.get('thought')}")
+            
+            # ==========================================================
+            # If the AI decides the investigation is complete
+            # ==========================================================
+            if command.get("is_final"):
+                print("[*] AI has concluded the investigation.")
+                
+                # Extract the new fields
+                raw_report = command.get("final_report", "No report provided.")
+                confidence = command.get("confidence_score", "N/A")
+                steps = command.get("completed_steps", [])
+                
+                # Format the checklist nicely using Markdown
+                checklist_markdown = "\n".join([f"- [x] {s}" for s in steps]) if steps else "- [ ] No steps recorded."
+                
+                # Build the final string to inject into the database
+                final_output = (
+                    f"{raw_report}\n\n"
+                    f"###  AI Confidence Score: {confidence}%\n\n"
+                    f"###  SOP Execution Checklist:\n{checklist_markdown}"
+                )
+                
+                return final_output
+                
+            # ==========================================================
+            # Otherwise, execute the requested tool
+            # ==========================================================
+            tool = command.get("tool")
+            target = command.get("target")
+            port = command.get("port")
+            ssh_cmd = command.get("command")
+            sql_query = command.get("query")
+            
+            if tool == "ping_server":
+                result = ping_server(target)
+            elif tool == "check_port":
+                result = check_port(target, port)
+            elif tool == "verify_smb_connectivity":
+                result = verify_smb_connectivity(target)
+            elif tool == "check_http_endpoint":
+                result = check_http_endpoint(target)
+            elif tool == "check_db_connection":
+                result = check_db_connection(target, port)
+            elif tool == "fetch_mlflow_metrics":
+                result = fetch_mlflow_metrics(target)
+            elif tool == "run_ssh_command":       
+                result = run_ssh_command(target, ssh_cmd)
+            elif tool == "query_database":
+                result = query_database(sql_query, db_prefix=target)
+            else:
+                result = f"Error: LLM hallucinated an unknown tool '{tool}'"
+                
+            print(f"[*] Tool Result: {result}")
+            
+            # Append the result to the log for the AI to read on the next loop
+            investigation_log += f"\nStep {step} - Used {tool} on {target}: {result}"
+
+        except json.JSONDecodeError:
+            print("[!] Failed to parse LLM output as JSON.")
+            return "VERIFICATION FAILED: LLM did not return strict JSON."
+        except Exception as e:
+            return f"CRITICAL ERROR: {e}"
+
+    # If the loop maxes out before 'is_final' becomes true
+    return f"INVESTIGATION TIMEOUT (Max steps reached). Evidence gathered:\n{investigation_log}"
