@@ -1,0 +1,164 @@
+import os
+import time
+import mysql.connector
+from dotenv import load_dotenv
+
+# Import the agents you built previously
+# (Ensure proposer_agent.py and verifier_agent.py are in the same folder)
+from proposer_agent import run_proposer_agent
+from verifier_agent import run_verifier_agent
+
+# Load environment variables
+load_dotenv()
+DB_CONFIG = {
+    'host': os.getenv('DB_HOST'),
+    'port': int(os.getenv('DB_PORT', 3306)),
+    'user': os.getenv('DB_USER'),
+    'password': os.getenv('DB_PASSWORD'),
+    'database': os.getenv('DB_NAME')
+}
+
+def get_db_connection():
+    return mysql.connector.connect(**DB_CONFIG)
+
+def process_incident():
+    """Checks for a single 'NEW' incident and runs it through the AI pipeline."""
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    try:
+        # 1. Look for a NEW incident
+        # LIMIT 1 ensures we only process one at a time to prevent system overload
+        cursor.execute("SELECT * FROM live_incidents WHERE pipeline_status = 'NEW' LIMIT 1")
+        incident = cursor.fetchone()
+        
+        if not incident:
+            return False # No new incidents found
+            
+        incident_id = incident['incident_id']
+        print("\n" + "="*60)
+        print(f"[*] Found NEW Incident: ID #{incident_id} from {incident['source_system'].upper()}")
+        
+        # 2. Lock the incident so no other scripts process it
+        cursor.execute(
+            "UPDATE live_incidents SET pipeline_status = 'ANALYZING' WHERE incident_id = %s", 
+            (incident_id,)
+        )
+        conn.commit()
+        print(f"[*] State changed -> ANALYZING")
+
+        # 3. Trigger the Proposer Agent
+        print(f"[*] Routing to Proposer Agent...")
+        proposer_output = run_proposer_agent(
+            source_system=incident['source_system'],
+            component_id=incident['component_id'],
+            exception_type=incident['exception_type'],
+            error_message=incident['error_message']
+        )
+        
+        # 4. Save Proposer results & transition state
+        split_keyword = "## Proposed Actionable Fix"
+        
+        if split_keyword in proposer_output:
+            parts = proposer_output.split(split_keyword)
+            
+            # Strip out the "# Readme" to make the RCA start perfectly with "## Proposed Root Cause"
+            rca_text = parts[0].replace("# Readme", "").strip()
+            
+            # Explicitly force the Markdown header onto the fix text
+            fix_text = f"## Proposed Actionable Fix\n{parts[1].strip()}"
+        else:
+            rca_text = proposer_output.replace("# Readme", "").strip()
+            fix_text = "## Proposed Actionable Fix\nSee ai_proposed_root_cause for fix details."
+
+        cursor.execute(
+            """
+            UPDATE live_incidents 
+            SET pipeline_status = 'AWAITING_VERIFICATION', 
+                ai_proposed_root_cause = %s,
+                ai_proposed_fix = %s
+            WHERE incident_id = %s
+            """, 
+            (rca_text, fix_text, incident_id)
+        )
+        conn.commit()
+        print(f"[*] State changed -> AWAITING_VERIFICATION")
+        
+        # =====================================================================
+        # 4.5. FETCH THE RAW DATABASE SOP (UPDATED FOR NORMALIZED DB)
+        # =====================================================================
+        print(f"[*] Extracting strict SOP from dag_sops...")
+        cursor.execute(
+            "SELECT investigation_sop FROM dag_sops WHERE DAG_id = %s LIMIT 1",
+            (incident['component_id'],)
+        )
+        sop_record = cursor.fetchone()
+        
+        if sop_record and sop_record['investigation_sop']:
+            raw_sop_text = sop_record['investigation_sop']
+        else:
+            raw_sop_text = "No strict SOP found in database. Rely on Proposer Agent's suggested fixes."
+            
+        # 5. Trigger the Verifier Agent
+        print(f"[*] Routing to Verifier Agent for live infrastructure check...")
+        verifier_output = run_verifier_agent(
+            incident_error_message=incident['error_message'],
+            proposed_rca=rca_text,
+            proposed_fix=fix_text,
+            raw_db_sop=raw_sop_text  # <== INJECTED RAW SOP HERE!
+        )
+        
+        # 6. Save Verifier results & finish the AI pipeline
+        
+        # Explicitly force the Markdown header onto the verifier output
+        verifier_formatted = f"## Verifier Result\n{verifier_output}"
+        
+        cursor.execute(
+            """
+            UPDATE live_incidents 
+            SET pipeline_status = 'VERIFIED', 
+                ai_verifier_result = %s 
+            WHERE incident_id = %s
+            """, 
+            (verifier_formatted, incident_id)
+        )
+        conn.commit()
+        print(f"[*] State changed -> VERIFIED. Pipeline complete for Incident #{incident_id}.")
+
+    except Exception as e:
+        print(f"[!] CRITICAL FAILURE processing Incident #{incident_id}: {e}")
+        # If the script crashes (e.g., API timeout), fail gracefully so it isn't stuck "ANALYZING" forever
+        cursor.execute(
+            "UPDATE live_incidents SET pipeline_status = 'ERROR' WHERE incident_id = %s", 
+            (incident_id,)
+        )
+        conn.commit()
+        return True
+        
+    finally:
+        cursor.close()
+        conn.close()
+
+# ==========================================
+# The Continuous Listener Loop
+# ==========================================
+if __name__ == "__main__":
+    print("[*] RCA Pipeline Orchestrator Started.")
+    print("[*] Listening for new database entries...\n")
+    
+    try:
+        while True:
+            # Try to process an incident. 
+            # If process_incident() returns False (none found), sleep for 10 seconds.
+            incident_processed = process_incident()
+            
+            if not incident_processed:
+                # Sleep prevents the script from spamming your database with thousands of queries a minute
+                time.sleep(10) 
+            else:
+                # If we just processed one, sleep for 2 seconds to let the DB settle, 
+                # then immediately loop again to catch the next one in the queue.
+                time.sleep(2)
+                
+    except KeyboardInterrupt:
+        print("\n[*] Orchestrator shut down manually (Ctrl+C).")
