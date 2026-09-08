@@ -1,0 +1,204 @@
+from __future__ import annotations
+import os
+import json
+import logging
+import requests
+import mysql.connector
+from dotenv import load_dotenv
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+# Load variables from the .env file
+load_dotenv()
+
+# Configure Enterprise Logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+LOGGER = logging.getLogger("rca.proposer")
+
+# 1. Configuration
+DB_CONFIG = {
+    'host': os.getenv('DB_HOST'),
+    'port': int(os.getenv('DB_PORT', 3306)),
+    'user': os.getenv('DB_USER'),
+    'password': os.getenv('DB_PASSWORD'),
+    'database': os.getenv('DB_NAME'),
+    'connection_timeout': 5  # Added for safety
+}
+
+LLM_URL = os.getenv('LLM_URL')
+
+# ==========================================
+# 2. PYDANTIC SCHEMAS (Strict Contracts)
+# ==========================================
+
+class ProposedRcaDossier(BaseModel):
+    """Strict schema for the Proposer's output payload."""
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    proposed_root_cause: str = Field(min_length=1, max_length=2000)
+    proposed_actionable_fix: str = Field(min_length=1, max_length=2000)
+    historical_confidence_score: int = Field(ge=1, le=100, description="Confidence based on historical match quality.")
+    is_historical_match: bool = Field(description="True if matched an exact component history, False if cold start/borrowed.")
+
+# ==========================================
+# 3. HELPER FUNCTIONS
+# ==========================================
+
+def extract_company_llm_completion(envelope: dict | str) -> str:
+    """Extracts JSON text safely from supported company-gateway response envelopes."""
+    candidate = None
+    if isinstance(envelope, dict):
+        if "completion" in envelope:
+            candidate = envelope["completion"]
+        elif "output_text" in envelope:
+            candidate = envelope["output_text"]
+    
+    if not isinstance(candidate, str) or not candidate.strip():
+        raise RuntimeError("Company LLM response did not contain a valid completion string.")
+
+    candidate = candidate.strip()
+    # Strip markdown code blocks if the LLM wrapped the JSON
+    import re
+    fenced = re.fullmatch(r"```(?:json)?\s*(\{.*\})\s*```", candidate, flags=re.S | re.I)
+    return fenced.group(1) if fenced else candidate
+
+# ==========================================
+# 4. DATABASE RETRIEVAL
+# ==========================================
+
+def fetch_historical_context(component_id, exception_type):
+    """Queries for exact matches first. Falls back to cross-project exception matches if empty."""
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
+        
+        # TIER 1: Search for the exact component (Now joining with dag_sops)
+        exact_query = """
+            SELECT r.root_cause, r.action_taken, s.investigation_sop, COUNT(*) as frequency
+            FROM rca_knowledge_base r
+            LEFT JOIN dag_sops s ON r.DAG_id = s.DAG_id
+            WHERE r.DAG_id = %s AND r.root_cause IS NOT NULL
+            GROUP BY r.root_cause, r.action_taken, s.investigation_sop
+            ORDER BY frequency DESC
+            LIMIT 5;
+        """
+        cursor.execute(exact_query, (component_id,))
+        history = cursor.fetchall()
+        
+        # TIER 2: If no exact history exists, borrow knowledge from other projects (Cold Start)
+        if not history:
+            LOGGER.info(f"Cold Start: No history for {component_id}. Searching cross-project for {exception_type}...")
+            cross_project_query = """
+                SELECT r.root_cause, r.action_taken, s.investigation_sop, COUNT(*) as frequency
+                FROM rca_knowledge_base r
+                LEFT JOIN dag_sops s ON r.DAG_id = s.DAG_id
+                WHERE r.exception_type = %s AND r.root_cause IS NOT NULL
+                GROUP BY r.root_cause, r.action_taken, s.investigation_sop
+                ORDER BY frequency DESC
+                LIMIT 5;
+            """
+            cursor.execute(cross_project_query, (exception_type,))
+            history = cursor.fetchall()
+            
+            # Flag so the LLM knows it is looking at borrowed knowledge
+            if history:
+                for row in history:
+                    row['is_borrowed'] = True
+                    
+        cursor.close()
+        conn.close()
+        return history
+    except Exception as e:
+        LOGGER.error(f"Database error: {e}")
+        return []
+
+# ==========================================
+# 5. CORE AGENT LOGIC
+# ==========================================
+
+def run_proposer_agent(source_system, component_id, exception_type, error_message) -> str:
+    """Executes the Proposer Agent and returns a validated JSON string."""
+    LOGGER.info(f"Analyzing {source_system} failure for {component_id}...")
+    
+    # 1. Fetch History
+    history = fetch_historical_context(component_id, exception_type)
+    
+    # 2. Format History for the Prompt
+    if history:
+        is_cold_start = history[0].get('is_borrowed', False)
+        if is_cold_start:
+            history_text = "HISTORICAL KNOWLEDGE BASE (Note: This project has no history. The following fixes are from OTHER projects with the exact same exception. Adapt carefully):\n"
+        else:
+            history_text = "HISTORICAL KNOWLEDGE BASE (Grouped by historical frequency):\n"
+
+        for i, row in enumerate(history, 1):
+            history_text += f"Pattern {i} (Occurred {row['frequency']} times in the past):\n"
+            history_text += f"- Past Root Cause: {row['root_cause']}\n"
+            if row.get('investigation_sop'):
+                history_text += f"- INVESTIGATION SOP: {row['investigation_sop']}\n  Instruct the Verifier to execute this SOP.\n\n"
+            else:
+                history_text += f"- ACTION TAKEN: {row['action_taken']}\n  Propose verification based on this action.\n\n"
+    else:
+        history_text = "No historical data available for this component or exception type. You must diagnose from scratch.\n"
+
+    # 3. Build Incident Context
+    if source_system == 'airflow' and exception_type == 'str' and str(error_message).startswith("{'DAG Id':"):
+        incident_context = f"Component {component_id} failed, but the log only captured execution metadata: {error_message}. This is a silent failure where the exception stack trace was lost."
+    else:
+        incident_context = f"System: {source_system.upper()}\nComponent: {component_id} failed with exception: {exception_type}.\nError details: {error_message}."
+
+    # 4. Construct the API Payload
+    api_input = f"CURRENT INCIDENT:\n{incident_context}\n\n{history_text}"
+    
+    api_prompt = f"""
+    You are an expert DevOps and Data Engineering Diagnostic Agent.
+    A pipeline has failed. Analyze the incident and the historical data, then propose the most likely root cause and actionable fix.
+    
+    INSTRUCTIONS:
+    1. Reason through the error message and how it aligns with historical patterns.
+    2. If the current error matches a historical pattern, heavily weight the historical fix with the highest occurrence count.
+    3. Determine a 'historical_confidence_score' (1-100). Give 90+ for exact historical matches, 50-80 for borrowed cross-project knowledge, and <50 for cold-start guesses.
+    
+    CRITICAL FORMATTING CONSTRAINT:
+    You must return ONLY ONE valid JSON object matching this exact schema. Do not return Markdown blocks.
+    {ProposedRcaDossier.model_json_schema()}
+    """
+    
+    headers = {"Authorization": "application/json", "Content-Type": "application/json"}
+    payload = {"input": api_input, "prompt": api_prompt}
+    
+    # 5. Call the API and Enforce Schema
+    try:
+        response = requests.post(LLM_URL, headers=headers, json=payload, timeout=120)
+        response.raise_for_status()
+        
+        # Safely extract and parse the company API envelope
+        raw_completion = extract_company_llm_completion(response.json())
+        
+        # Run strict Pydantic validation on the LLM output
+        validated_dossier = ProposedRcaDossier.model_validate_json(raw_completion)
+        
+        LOGGER.info(f"Proposer finished successfully with confidence: {validated_dossier.historical_confidence_score}")
+        
+        # Return the validated JSON string to pass to the Verifier or Database
+        return validated_dossier.model_dump_json()
+        
+    except ValidationError as e:
+        LOGGER.error("LLM returned invalid JSON schema.")
+        return json.dumps({
+            "proposed_root_cause": "Failed to parse Proposer LLM output.",
+            "proposed_actionable_fix": "System Error.",
+            "historical_confidence_score": 1,
+            "is_historical_match": False
+        })
+    except Exception as e:
+        LOGGER.error(f"Failed to complete Proposer LLM request: {e}")
+        return json.dumps({
+            "proposed_root_cause": f"Internal API Error: {e}",
+            "proposed_actionable_fix": "System Error.",
+            "historical_confidence_score": 1,
+            "is_historical_match": False
+        })
+
+# Example Usage:
+# result_json = run_proposer_agent('airflow', 'flipchip_monitor_flask_app_pll', 'ConnectionError', 'Endpoint refused connection')
+# print(result_json)
