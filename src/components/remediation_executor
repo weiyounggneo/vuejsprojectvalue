@@ -1,0 +1,802 @@
+from __future__ import annotations
+
+import json
+import logging
+import os
+import socket
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Optional
+
+import mysql.connector
+import paramiko
+from dotenv import load_dotenv
+
+
+# Load agents/.env regardless of the current working directory.
+ENV_FILE = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path=ENV_FILE)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+LOGGER = logging.getLogger("rca.remediation_executor")
+
+
+DB_CONFIG = {
+    "host": os.getenv("DB_HOST"),
+    "port": int(os.getenv("DB_PORT", "3306")),
+    "user": os.getenv("DB_USER"),
+    "password": os.getenv("DB_PASSWORD"),
+    "database": os.getenv("DB_NAME"),
+    "connection_timeout": 5,
+    "charset": "utf8mb4",
+    "collation": "utf8mb4_unicode_ci",
+    "use_unicode": True,
+}
+
+POLL_SECONDS = int(os.getenv("EXECUTOR_POLL_SECONDS", "3"))
+MAX_OUTPUT_BYTES = int(os.getenv("EXECUTOR_MAX_OUTPUT_BYTES", "262144"))
+HTTP_STATUS_MARKER = "__RCA_HTTP_STATUS__"
+
+
+# Target definitions contain environment-variable NAMES, not credentials.
+#
+# Preferred variables for the existing target:
+#   EXECUTOR_TARGET_MUASXV4106_HOST
+#   EXECUTOR_TARGET_MUASXV4106_SSH_PORT
+#   EXECUTOR_TARGET_MUASXV4106_SSH_USER
+#   EXECUTOR_TARGET_MUASXV4106_SSH_PASSWORD
+#   EXECUTOR_TARGET_MUASXV4106_SSH_KEY_FILE
+#   EXECUTOR_TARGET_MUASXV4106_SSH_KEY_PASSPHRASE
+#   EXECUTOR_TARGET_MUASXV4106_KNOWN_HOSTS
+#
+# The existing generic variables remain supported as fallbacks so the current
+# Ansible test continues working without an immediate .env migration.
+REGISTERED_TARGETS: dict[str, dict[str, Optional[str]]] = {
+    "MUASXV4106": {
+        "hostname_env": "EXECUTOR_TARGET_MUASXV4106_HOST",
+        "legacy_hostname_env": "EXECUTOR_TARGET_HOST",
+        "port_env": "EXECUTOR_TARGET_MUASXV4106_SSH_PORT",
+        "user_env": "EXECUTOR_TARGET_MUASXV4106_SSH_USER",
+        "password_env": "EXECUTOR_TARGET_MUASXV4106_SSH_PASSWORD",
+        "key_file_env": "EXECUTOR_TARGET_MUASXV4106_SSH_KEY_FILE",
+        "key_passphrase_env": (
+            "EXECUTOR_TARGET_MUASXV4106_SSH_KEY_PASSPHRASE"
+        ),
+        "known_hosts_env": "EXECUTOR_TARGET_MUASXV4106_KNOWN_HOSTS",
+    },
+}
+
+
+# The LLM, SOP, database and GUI cannot modify these commands.
+# Add a new action only after its exact command and verification have been
+# reviewed. The action starts disabled unless "enabled" is explicitly True.
+REGISTERED_ACTIONS: dict[str, dict[str, Any]] = {
+    "restart_ansible_web": {
+        "enabled": True,
+        "allowed_component_ids": (
+            "ansible_web_service_recovery_test",
+        ),
+        "target_id": "MUASXV4106",
+        "command": (
+            "cd /apps/pythonproj/ansible_home/flask_home "
+            "&& ./start.sh"
+        ),
+        "command_timeout_seconds": 60,
+        "verification_commands": {
+            "gunicorn": (
+                "pgrep -a -u dsaadm -f -- "
+                "'gunicorn.*run:app.*0.0.0.0:8888'"
+            ),
+            "huey": (
+                "pgrep -a -u dsaadm -f -- "
+                "'huey_consumer.py app.ansible_bp.tasks.huey'"
+            ),
+        },
+        "verification_command_timeout_seconds": 15,
+        "healthcheck_command": (
+            "curl --silent --show-error --include "
+            "--max-time 10 "
+            "--write-out "
+            "'\\n__RCA_HTTP_STATUS__:%{http_code}\\n' "
+            "'http://127.0.0.1:8888/auth/login'"
+        ),
+        "expected_http_statuses": (200,),
+        "verification_attempts": 6,
+        "verification_delay_seconds": 5,
+    },
+}
+
+
+def first_environment_value(*names: Optional[str]) -> Optional[str]:
+    for name in names:
+        if not name:
+            continue
+        value = os.getenv(name)
+        if value and value.strip():
+            return value.strip()
+    return None
+
+
+def require_environment_value(
+    description: str,
+    *names: Optional[str],
+) -> str:
+    value = first_environment_value(*names)
+    if value is None:
+        configured_names = ", ".join(name for name in names if name)
+        raise RuntimeError(
+            f"Missing {description}. Configure one of: {configured_names}"
+        )
+    return value
+
+
+def get_db_connection():
+    return mysql.connector.connect(**DB_CONFIG)
+
+
+def utc_now_string() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def resolve_target(target_id: str) -> dict[str, Any]:
+    specification = REGISTERED_TARGETS.get(target_id)
+    if specification is None:
+        raise RuntimeError(f"Unknown target_id: {target_id}")
+
+    hostname = require_environment_value(
+        f"hostname for target {target_id}",
+        specification.get("hostname_env"),
+        specification.get("legacy_hostname_env"),
+    )
+    port_text = first_environment_value(
+        specification.get("port_env"),
+        "EXECUTOR_SSH_PORT",
+    ) or "22"
+    try:
+        port = int(port_text)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"SSH port for target {target_id} must be an integer"
+        ) from exc
+    if not 1 <= port <= 65535:
+        raise RuntimeError(
+            f"SSH port for target {target_id} is outside 1-65535"
+        )
+
+    ssh_user = require_environment_value(
+        f"SSH user for target {target_id}",
+        specification.get("user_env"),
+        "EXECUTOR_SSH_USER",
+    )
+    target_password = first_environment_value(
+        specification.get("password_env")
+    )
+    target_key_file = first_environment_value(
+        specification.get("key_file_env")
+    )
+    if target_password or target_key_file:
+        # Once target-specific authentication is configured, do not mix it
+        # with a credential left in the legacy/global variables.
+        ssh_password = target_password
+        ssh_key_file = target_key_file
+        ssh_key_passphrase = first_environment_value(
+            specification.get("key_passphrase_env")
+        )
+    else:
+        ssh_password = first_environment_value("EXECUTOR_SSH_PASSWORD")
+        ssh_key_file = first_environment_value("EXECUTOR_SSH_KEY_FILE")
+        ssh_key_passphrase = first_environment_value(
+            "EXECUTOR_SSH_KEY_PASSPHRASE"
+        )
+    known_hosts = require_environment_value(
+        f"known_hosts file for target {target_id}",
+        specification.get("known_hosts_env"),
+        "EXECUTOR_KNOWN_HOSTS",
+    )
+
+    if not ssh_key_file and not ssh_password:
+        raise RuntimeError(
+            f"Configure an SSH key file or password for target {target_id}"
+        )
+
+    known_hosts_path = Path(known_hosts).expanduser()
+    if not known_hosts_path.is_file():
+        raise RuntimeError(
+            f"known_hosts file does not exist: {known_hosts_path}"
+        )
+
+    key_path: Optional[Path] = None
+    if ssh_key_file:
+        key_path = Path(ssh_key_file).expanduser()
+        if not key_path.is_file():
+            raise RuntimeError(f"SSH key file does not exist: {key_path}")
+
+    return {
+        "target_id": target_id,
+        "hostname": hostname,
+        "port": port,
+        "ssh_user": ssh_user,
+        "ssh_password": ssh_password,
+        "ssh_key_file": str(key_path) if key_path else None,
+        "ssh_key_passphrase": ssh_key_passphrase,
+        "known_hosts": str(known_hosts_path),
+    }
+
+
+def validate_startup_configuration() -> None:
+    missing_db_values = [
+        key
+        for key in ("host", "user", "password", "database")
+        if not DB_CONFIG.get(key)
+    ]
+    if missing_db_values:
+        raise RuntimeError(
+            "Missing database configuration: "
+            + ", ".join(missing_db_values)
+        )
+    if POLL_SECONDS < 1:
+        raise RuntimeError("EXECUTOR_POLL_SECONDS must be at least 1")
+    if MAX_OUTPUT_BYTES < 4096:
+        raise RuntimeError("EXECUTOR_MAX_OUTPUT_BYTES must be at least 4096")
+
+    enabled_actions = 0
+    for action_id, action in REGISTERED_ACTIONS.items():
+        if not action.get("enabled", False):
+            continue
+        enabled_actions += 1
+        if not action.get("allowed_component_ids"):
+            raise RuntimeError(
+                f"Action {action_id} has no allowed_component_ids"
+            )
+        if action.get("target_id") not in REGISTERED_TARGETS:
+            raise RuntimeError(
+                f"Action {action_id} references an unknown target"
+            )
+        if not str(action.get("command") or "").strip():
+            raise RuntimeError(f"Action {action_id} has no command")
+        if not action.get("verification_commands") and not action.get(
+            "healthcheck_command"
+        ):
+            raise RuntimeError(
+                f"Action {action_id} has no post-action verification"
+            )
+        resolve_target(action["target_id"])
+
+    if enabled_actions == 0:
+        LOGGER.warning("No remediation actions are enabled")
+
+
+def create_ssh_client(target_id: str) -> tuple[paramiko.SSHClient, dict[str, Any]]:
+    target = resolve_target(target_id)
+    client = paramiko.SSHClient()
+    client.load_host_keys(target["known_hosts"])
+
+    # Never silently trust an unknown server.
+    client.set_missing_host_key_policy(paramiko.RejectPolicy())
+
+    connection_options: dict[str, Any] = {
+        "hostname": target["hostname"],
+        "port": target["port"],
+        "username": target["ssh_user"],
+        "timeout": 10,
+        "banner_timeout": 10,
+        "auth_timeout": 10,
+        "allow_agent": False,
+        "look_for_keys": False,
+    }
+
+    if target["ssh_key_file"]:
+        connection_options["key_filename"] = target["ssh_key_file"]
+        if target["ssh_key_passphrase"]:
+            connection_options["passphrase"] = target[
+                "ssh_key_passphrase"
+            ]
+    else:
+        connection_options["password"] = target["ssh_password"]
+
+    client.connect(**connection_options)
+    return client, target
+
+
+def append_limited(
+    destination: bytearray,
+    chunk: bytes,
+    limit: int,
+) -> bool:
+    remaining = limit - len(destination)
+    if remaining <= 0:
+        return bool(chunk)
+    destination.extend(chunk[:remaining])
+    return len(chunk) > remaining
+
+
+def execute_fixed_command(
+    client: paramiko.SSHClient,
+    command: str,
+    timeout: int = 60,
+) -> dict[str, Any]:
+    """Execute a code-owned command while draining bounded stdout/stderr."""
+
+    transport = client.get_transport()
+    if transport is None or not transport.is_active():
+        raise RuntimeError("SSH transport is not active")
+
+    channel = transport.open_session(timeout=10)
+    channel.exec_command(command)
+
+    stdout_buffer = bytearray()
+    stderr_buffer = bytearray()
+    output_truncated = False
+    timed_out = False
+    deadline = time.monotonic() + timeout
+
+    while True:
+        received_data = False
+
+        while channel.recv_ready():
+            received_data = True
+            output_truncated = (
+                append_limited(
+                    stdout_buffer,
+                    channel.recv(32768),
+                    MAX_OUTPUT_BYTES,
+                )
+                or output_truncated
+            )
+
+        while channel.recv_stderr_ready():
+            received_data = True
+            output_truncated = (
+                append_limited(
+                    stderr_buffer,
+                    channel.recv_stderr(32768),
+                    MAX_OUTPUT_BYTES,
+                )
+                or output_truncated
+            )
+
+        if channel.exit_status_ready() and not received_data:
+            exit_code = channel.recv_exit_status()
+            break
+
+        if time.monotonic() >= deadline:
+            timed_out = True
+            exit_code = 124
+            channel.close()
+            timeout_message = (
+                f"\nCommand timed out after {timeout} seconds"
+            ).encode("utf-8")
+            output_truncated = (
+                append_limited(
+                    stderr_buffer,
+                    timeout_message,
+                    MAX_OUTPUT_BYTES,
+                )
+                or output_truncated
+            )
+            break
+
+        time.sleep(0.05)
+
+    return {
+        "exit_code": exit_code,
+        "stdout": stdout_buffer.decode("utf-8", errors="replace").strip(),
+        "stderr": stderr_buffer.decode("utf-8", errors="replace").strip(),
+        "timed_out": timed_out,
+        "output_truncated": output_truncated,
+    }
+
+
+def verify_processes(
+    client: paramiko.SSHClient,
+    verification_commands: dict[str, str],
+    timeout: int,
+) -> dict[str, Any]:
+    observations: dict[str, Any] = {}
+    all_healthy = True
+
+    for check_name, command in verification_commands.items():
+        result = execute_fixed_command(client, command, timeout=timeout)
+        healthy = result["exit_code"] == 0 and bool(result["stdout"].strip())
+
+        observations[check_name] = {
+            "healthy": healthy,
+            "exit_code": result["exit_code"],
+            "output": result["stdout"],
+            "error": result["stderr"],
+            "timed_out": result["timed_out"],
+            "output_truncated": result["output_truncated"],
+        }
+        if not healthy:
+            all_healthy = False
+
+    return {
+        "healthy": all_healthy,
+        "observations": observations,
+    }
+
+
+def verify_http_endpoint(
+    client: paramiko.SSHClient,
+    command: str,
+    expected_statuses: tuple[int, ...],
+) -> dict[str, Any]:
+    result = execute_fixed_command(client, command, timeout=15)
+    marker = f"{HTTP_STATUS_MARKER}:"
+    status_code: Optional[int] = None
+
+    if marker in result["stdout"]:
+        status_text = (
+            result["stdout"]
+            .rsplit(marker, 1)[1]
+            .strip()
+            .splitlines()[0]
+        )
+        try:
+            status_code = int(status_text)
+        except (TypeError, ValueError):
+            status_code = None
+
+    healthy = (
+        result["exit_code"] == 0
+        and status_code in expected_statuses
+    )
+
+    return {
+        "healthy": healthy,
+        "status_code": status_code,
+        "expected_statuses": list(expected_statuses),
+        "exit_code": result["exit_code"],
+        "response": result["stdout"],
+        "error": result["stderr"],
+        "timed_out": result["timed_out"],
+        "output_truncated": result["output_truncated"],
+    }
+
+
+def verify_recovery(
+    client: paramiko.SSHClient,
+    action: dict[str, Any],
+) -> dict[str, Any]:
+    attempts = int(action.get("verification_attempts", 6))
+    delay_seconds = int(action.get("verification_delay_seconds", 5))
+    process_timeout = int(
+        action.get("verification_command_timeout_seconds", 15)
+    )
+
+    last_process_result: dict[str, Any] = {}
+    last_http_result: dict[str, Any] = {}
+
+    for attempt in range(1, attempts + 1):
+        last_process_result = verify_processes(
+            client,
+            action.get("verification_commands", {}),
+            timeout=process_timeout,
+        )
+
+        healthcheck_command = action.get("healthcheck_command")
+        if healthcheck_command:
+            last_http_result = verify_http_endpoint(
+                client,
+                healthcheck_command,
+                tuple(action.get("expected_http_statuses", (200,))),
+            )
+        else:
+            last_http_result = {
+                "healthy": True,
+                "skipped": True,
+                "reason": "No HTTP verification is registered for this action",
+            }
+
+        recovery_healthy = (
+            last_process_result.get("healthy") is True
+            and last_http_result.get("healthy") is True
+        )
+
+        if recovery_healthy:
+            return {
+                "healthy": True,
+                "attempts_used": attempt,
+                "processes": last_process_result,
+                "http": last_http_result,
+            }
+
+        if attempt < attempts:
+            LOGGER.info(
+                "Recovery not ready after attempt %s/%s; retrying in %s seconds",
+                attempt,
+                attempts,
+                delay_seconds,
+            )
+            time.sleep(delay_seconds)
+
+    return {
+        "healthy": False,
+        "attempts_used": attempts,
+        "processes": last_process_result,
+        "http": last_http_result,
+    }
+
+
+def run_registered_action(
+    action_id: str,
+    target_id: str,
+    component_id: str,
+) -> dict[str, Any]:
+    action = REGISTERED_ACTIONS.get(action_id)
+
+    if action is None:
+        raise RuntimeError(f"Unknown action_id: {action_id}")
+    if not action.get("enabled", False):
+        raise RuntimeError(f"Action {action_id} is disabled")
+    if target_id != action["target_id"]:
+        raise RuntimeError(
+            f"Action {action_id} is not authorized for target {target_id}"
+        )
+    if component_id not in action["allowed_component_ids"]:
+        raise RuntimeError(
+            f"Action {action_id} is not authorized for component {component_id}"
+        )
+
+    client: Optional[paramiko.SSHClient] = None
+    try:
+        client, target = create_ssh_client(action["target_id"])
+        LOGGER.info(
+            "Executing registered action %s on target %s (%s)",
+            action_id,
+            target_id,
+            target["hostname"],
+        )
+
+        execution = execute_fixed_command(
+            client,
+            action["command"],
+            timeout=int(action.get("command_timeout_seconds", 60)),
+        )
+
+        if execution["exit_code"] != 0:
+            return {
+                "success": False,
+                "execution": execution,
+                "verification": None,
+                "error": (
+                    "The registered action returned a non-zero exit status"
+                ),
+            }
+
+        verification = verify_recovery(client, action)
+        if verification["healthy"]:
+            LOGGER.info(
+                "Recovery verified successfully for action %s",
+                action_id,
+            )
+            return {
+                "success": True,
+                "execution": execution,
+                "verification": verification,
+                "error": None,
+            }
+
+        http_status = verification.get("http", {}).get("status_code")
+        return {
+            "success": False,
+            "execution": execution,
+            "verification": verification,
+            "error": (
+                "The action completed, but post-action verification failed. "
+                f"Last HTTP status: {http_status}"
+            ),
+        }
+    finally:
+        if client is not None:
+            client.close()
+
+
+def claim_approved_request() -> Optional[dict[str, Any]]:
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+
+    try:
+        connection.start_transaction()
+        cursor.execute(
+            """
+            SELECT
+                r.remediation_id,
+                r.incident_id,
+                r.action_id,
+                r.target_id,
+                i.component_id
+            FROM remediation_requests r
+            INNER JOIN live_incidents i
+                ON i.incident_id = r.incident_id
+            WHERE r.status = 'APPROVED'
+            ORDER BY r.approved_at ASC, r.remediation_id ASC
+            LIMIT 1
+            FOR UPDATE
+            """
+        )
+        request_record = cursor.fetchone()
+
+        if request_record is None:
+            connection.rollback()
+            return None
+
+        cursor.execute(
+            """
+            UPDATE remediation_requests
+            SET status = 'RUNNING',
+                started_at = %s,
+                executor_host = %s
+            WHERE remediation_id = %s
+              AND status = 'APPROVED'
+            """,
+            (
+                utc_now_string(),
+                socket.gethostname(),
+                request_record["remediation_id"],
+            ),
+        )
+
+        if cursor.rowcount != 1:
+            connection.rollback()
+            return None
+
+        connection.commit()
+        return request_record
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def save_result(
+    remediation_id: int,
+    result: dict[str, Any],
+) -> None:
+    execution = result.get("execution") or {}
+    verification = result.get("verification")
+    status = "SUCCEEDED" if result.get("success") else "FAILED"
+
+    connection = get_db_connection()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute(
+            """
+            UPDATE remediation_requests
+            SET status = %s,
+                completed_at = %s,
+                exit_code = %s,
+                stdout_text = %s,
+                stderr_text = %s,
+                verification_result = %s,
+                error_message = %s
+            WHERE remediation_id = %s
+              AND status = 'RUNNING'
+            """,
+            (
+                status,
+                utc_now_string(),
+                execution.get("exit_code"),
+                execution.get("stdout"),
+                execution.get("stderr"),
+                (
+                    json.dumps(verification, ensure_ascii=False)
+                    if verification is not None
+                    else None
+                ),
+                result.get("error"),
+                remediation_id,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise RuntimeError(
+                "Remediation result was not saved because the request "
+                "is no longer RUNNING"
+            )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def save_unexpected_failure(
+    remediation_id: int,
+    error: Exception,
+) -> None:
+    connection = get_db_connection()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute(
+            """
+            UPDATE remediation_requests
+            SET status = 'FAILED',
+                completed_at = %s,
+                error_message = %s
+            WHERE remediation_id = %s
+              AND status = 'RUNNING'
+            """,
+            (
+                utc_now_string(),
+                f"Unexpected executor failure: {error}"[:4000],
+                remediation_id,
+            ),
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def run_executor() -> None:
+    validate_startup_configuration()
+    enabled_action_ids = sorted(
+        action_id
+        for action_id, action in REGISTERED_ACTIONS.items()
+        if action.get("enabled", False)
+    )
+
+    LOGGER.info("Remediation executor started")
+    LOGGER.info("Registered enabled actions: %s", enabled_action_ids)
+
+    while True:
+        request_record: Optional[dict[str, Any]] = None
+
+        try:
+            request_record = claim_approved_request()
+            if request_record is None:
+                time.sleep(POLL_SECONDS)
+                continue
+
+            LOGGER.info(
+                "Claimed remediation request %s",
+                request_record["remediation_id"],
+            )
+
+            result = run_registered_action(
+                action_id=request_record["action_id"],
+                target_id=request_record["target_id"],
+                component_id=request_record["component_id"],
+            )
+            save_result(request_record["remediation_id"], result)
+
+            LOGGER.info(
+                "Remediation %s finished: %s",
+                request_record["remediation_id"],
+                "SUCCEEDED" if result.get("success") else "FAILED",
+            )
+        except KeyboardInterrupt:
+            LOGGER.info("Remediation executor stopped")
+            return
+        except Exception as exc:
+            LOGGER.exception("Executor failure")
+
+            if request_record is not None:
+                try:
+                    save_unexpected_failure(
+                        request_record["remediation_id"],
+                        exc,
+                    )
+                except Exception:
+                    LOGGER.exception(
+                        "Could not persist the unexpected executor failure"
+                    )
+
+            time.sleep(POLL_SECONDS)
+
+
+if __name__ == "__main__":
+    run_executor()
