@@ -38,6 +38,9 @@ DB_CONFIG = {
 }
 
 POLL_SECONDS = int(os.getenv("EXECUTOR_POLL_SECONDS", "3"))
+APPROVAL_TTL_SECONDS = int(
+    os.getenv("EXECUTOR_APPROVAL_TTL_SECONDS", "900")
+)
 MAX_OUTPUT_BYTES = int(os.getenv("EXECUTOR_MAX_OUTPUT_BYTES", "262144"))
 HTTP_STATUS_MARKER = "__RCA_HTTP_STATUS__"
 
@@ -240,6 +243,10 @@ def validate_startup_configuration() -> None:
         )
     if POLL_SECONDS < 1:
         raise RuntimeError("EXECUTOR_POLL_SECONDS must be at least 1")
+    if APPROVAL_TTL_SECONDS < 60:
+        raise RuntimeError(
+            "EXECUTOR_APPROVAL_TTL_SECONDS must be at least 60"
+        )
     if MAX_OUTPUT_BYTES < 4096:
         raise RuntimeError("EXECUTOR_MAX_OUTPUT_BYTES must be at least 4096")
 
@@ -397,25 +404,45 @@ def verify_processes(
     timeout: int,
 ) -> dict[str, Any]:
     observations: dict[str, Any] = {}
-    all_healthy = True
+    states: list[str] = []
 
     for check_name, command in verification_commands.items():
         result = execute_fixed_command(client, command, timeout=timeout)
-        healthy = result["exit_code"] == 0 and bool(result["stdout"].strip())
+
+        if result["timed_out"]:
+            state = "INCONCLUSIVE"
+        elif result["exit_code"] == 0 and result["stdout"].strip():
+            state = "HEALTHY"
+        elif result["exit_code"] == 1:
+            # pgrep uses exit code 1 when no matching process exists.
+            state = "UNHEALTHY"
+        else:
+            # A missing command, permission problem or other diagnostic error
+            # must not be treated as proof that a restart is required.
+            state = "INCONCLUSIVE"
+
+        states.append(state)
 
         observations[check_name] = {
-            "healthy": healthy,
+            "healthy": state == "HEALTHY",
+            "state": state,
             "exit_code": result["exit_code"],
             "output": result["stdout"],
             "error": result["stderr"],
             "timed_out": result["timed_out"],
             "output_truncated": result["output_truncated"],
         }
-        if not healthy:
-            all_healthy = False
+
+    if "INCONCLUSIVE" in states:
+        overall_state = "INCONCLUSIVE"
+    elif "UNHEALTHY" in states:
+        overall_state = "UNHEALTHY"
+    else:
+        overall_state = "HEALTHY"
 
     return {
-        "healthy": all_healthy,
+        "healthy": overall_state == "HEALTHY",
+        "state": overall_state,
         "observations": observations,
     }
 
@@ -425,7 +452,12 @@ def verify_http_endpoint(
     command: str,
     expected_statuses: tuple[int, ...],
 ) -> dict[str, Any]:
-    result = execute_fixed_command(client, command, timeout=15)
+    result = execute_fixed_command(
+        client,
+        command,
+        timeout=15,
+    )
+
     marker = f"{HTTP_STATUS_MARKER}:"
     status_code: Optional[int] = None
 
@@ -436,25 +468,111 @@ def verify_http_endpoint(
             .strip()
             .splitlines()[0]
         )
+
         try:
             status_code = int(status_text)
         except (TypeError, ValueError):
             status_code = None
 
-    healthy = (
+    # These curl exit codes confirm that the registered
+    # application endpoint is unavailable.
+    curl_unhealthy_exit_codes = {
+        7,   # Failed to connect
+        28,  # Request timed out
+        52,  # Empty reply from server
+        56,  # Connection or receive failure
+    }
+
+    if result["timed_out"]:
+        # The executor stopped waiting for the remote
+        # diagnostic command. Its result is unreliable.
+        state = "INCONCLUSIVE"
+
+    elif (
         result["exit_code"] == 0
-        and status_code in expected_statuses
-    )
+        and status_code is not None
+    ):
+        # Curl received a valid HTTP response.
+        state = (
+            "HEALTHY"
+            if status_code in expected_statuses
+            else "UNHEALTHY"
+        )
+
+    elif (
+        result["exit_code"]
+        in curl_unhealthy_exit_codes
+    ):
+        # Curl ran successfully enough to establish that
+        # the application endpoint is unavailable.
+        state = "UNHEALTHY"
+
+    else:
+        # Examples include curl not being installed,
+        # permission problems, malformed commands or an
+        # unexpected diagnostic failure.
+        state = "INCONCLUSIVE"
 
     return {
-        "healthy": healthy,
+        "healthy": state == "HEALTHY",
+        "state": state,
         "status_code": status_code,
-        "expected_statuses": list(expected_statuses),
+        "expected_statuses": list(
+            expected_statuses,
+        ),
         "exit_code": result["exit_code"],
         "response": result["stdout"],
         "error": result["stderr"],
         "timed_out": result["timed_out"],
-        "output_truncated": result["output_truncated"],
+        "output_truncated": result[
+            "output_truncated"
+        ],
+    }
+
+
+def check_current_state(
+    client: paramiko.SSHClient,
+    action: dict[str, Any],
+) -> dict[str, Any]:
+    """Run one read-only check immediately before any action."""
+
+    process_result = verify_processes(
+        client,
+        action.get("verification_commands", {}),
+        timeout=int(
+            action.get("verification_command_timeout_seconds", 15)
+        ),
+    )
+
+    healthcheck_command = action.get("healthcheck_command")
+    if healthcheck_command:
+        http_result = verify_http_endpoint(
+            client,
+            healthcheck_command,
+            tuple(action.get("expected_http_statuses", (200,))),
+        )
+    else:
+        http_result = {
+            "healthy": True,
+            "state": "HEALTHY",
+            "skipped": True,
+            "reason": "No HTTP verification is registered for this action",
+        }
+
+    states = (process_result["state"], http_result["state"])
+    if "INCONCLUSIVE" in states:
+        overall_state = "INCONCLUSIVE"
+    elif "UNHEALTHY" in states:
+        overall_state = "UNHEALTHY"
+    else:
+        overall_state = "HEALTHY"
+
+    return {
+        "healthy": overall_state == "HEALTHY",
+        "state": overall_state,
+        "checked_at": utc_now_string(),
+        "processes": process_result,
+        "http": http_result,
     }
 
 
@@ -545,6 +663,47 @@ def run_registered_action(
     client: Optional[paramiko.SSHClient] = None
     try:
         client, target = create_ssh_client(action["target_id"])
+
+        # Safeguard: the approved command is never executed based only on old
+        # verifier evidence. Re-check the live target immediately beforehand.
+        precheck = check_current_state(client, action)
+
+        if precheck["state"] == "HEALTHY":
+            LOGGER.info(
+                "Skipping action %s because target %s is already healthy",
+                action_id,
+                target_id,
+            )
+            return {
+                "success": True,
+                "execution_performed": False,
+                "execution": None,
+                "verification": {
+                    **precheck,
+                    "outcome": "ALREADY_HEALTHY",
+                    "execution_performed": False,
+                    "precheck": precheck,
+                },
+                "error": None,
+            }
+
+        if precheck["state"] == "INCONCLUSIVE":
+            return {
+                "success": False,
+                "execution_performed": False,
+                "execution": None,
+                "verification": {
+                    **precheck,
+                    "outcome": "PRECHECK_INCONCLUSIVE",
+                    "execution_performed": False,
+                    "precheck": precheck,
+                },
+                "error": (
+                    "The live pre-action check was inconclusive. "
+                    "No command was executed."
+                ),
+            }
+
         LOGGER.info(
             "Executing registered action %s on target %s (%s)",
             action_id,
@@ -561,29 +720,40 @@ def run_registered_action(
         if execution["exit_code"] != 0:
             return {
                 "success": False,
+                "execution_performed": True,
                 "execution": execution,
-                "verification": None,
+                "verification": {
+                    "outcome": "ACTION_FAILED",
+                    "execution_performed": True,
+                    "precheck": precheck,
+                },
                 "error": (
                     "The registered action returned a non-zero exit status"
                 ),
             }
 
         verification = verify_recovery(client, action)
+        verification["precheck"] = precheck
+        verification["execution_performed"] = True
         if verification["healthy"]:
+            verification["outcome"] = "RECOVERED"
             LOGGER.info(
                 "Recovery verified successfully for action %s",
                 action_id,
             )
             return {
                 "success": True,
+                "execution_performed": True,
                 "execution": execution,
                 "verification": verification,
                 "error": None,
             }
 
         http_status = verification.get("http", {}).get("status_code")
+        verification["outcome"] = "POSTCHECK_FAILED"
         return {
             "success": False,
+            "execution_performed": True,
             "execution": execution,
             "verification": verification,
             "error": (
@@ -602,6 +772,36 @@ def claim_approved_request() -> Optional[dict[str, Any]]:
 
     try:
         connection.start_transaction()
+
+        # Safeguard: an approval is only valid for a short period. Reuse the
+        # existing FAILED state so no schema migration is required.
+        cursor.execute(
+            """
+            UPDATE remediation_requests
+            SET status = 'FAILED',
+                completed_at = %s,
+                error_message = %s
+            WHERE status = 'APPROVED'
+              AND (
+                    approved_at IS NULL
+                    OR approved_at < TIMESTAMPADD(
+                        SECOND,
+                        %s,
+                        UTC_TIMESTAMP()
+                    )
+              )
+            """,
+            (
+                utc_now_string(),
+                (
+                    "Approval expired before the executor claimed the request. "
+                    "No command was executed."
+                ),
+                -APPROVAL_TTL_SECONDS,
+            ),
+        )
+        expired_count = cursor.rowcount
+
         cursor.execute(
             """
             SELECT
@@ -614,15 +814,28 @@ def claim_approved_request() -> Optional[dict[str, Any]]:
             INNER JOIN live_incidents i
                 ON i.incident_id = r.incident_id
             WHERE r.status = 'APPROVED'
+              AND r.approved_at >= TIMESTAMPADD(
+                    SECOND,
+                    %s,
+                    UTC_TIMESTAMP()
+              )
             ORDER BY r.approved_at ASC, r.remediation_id ASC
             LIMIT 1
             FOR UPDATE
-            """
+            """,
+            (-APPROVAL_TTL_SECONDS,),
         )
         request_record = cursor.fetchone()
 
         if request_record is None:
-            connection.rollback()
+            if expired_count:
+                connection.commit()
+                LOGGER.warning(
+                    "Expired %s stale approved remediation request(s)",
+                    expired_count,
+                )
+            else:
+                connection.rollback()
             return None
 
         cursor.execute(
@@ -633,11 +846,17 @@ def claim_approved_request() -> Optional[dict[str, Any]]:
                 executor_host = %s
             WHERE remediation_id = %s
               AND status = 'APPROVED'
+              AND approved_at >= TIMESTAMPADD(
+                    SECOND,
+                    %s,
+                    UTC_TIMESTAMP()
+              )
             """,
             (
                 utc_now_string(),
                 socket.gethostname(),
                 request_record["remediation_id"],
+                -APPROVAL_TTL_SECONDS,
             ),
         )
 
@@ -646,6 +865,11 @@ def claim_approved_request() -> Optional[dict[str, Any]]:
             return None
 
         connection.commit()
+        if expired_count:
+            LOGGER.warning(
+                "Expired %s stale approved remediation request(s)",
+                expired_count,
+            )
         return request_record
     except Exception:
         connection.rollback()
