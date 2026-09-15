@@ -16,6 +16,21 @@ import requests
 from dotenv import load_dotenv
 
 try:
+    from .target_registry import (
+        TargetConfigurationError,
+        install_pinned_host_key,
+        resolve_database_target,
+        resolve_ssh_target,
+    )
+except ImportError:
+    from target_registry import (
+        TargetConfigurationError,
+        install_pinned_host_key,
+        resolve_database_target,
+        resolve_ssh_target,
+    )
+
+try:
     import smbclient
     from smbprotocol.exceptions import SMBException
 except ImportError:  # SMB checks remain unavailable without the optional package.
@@ -147,57 +162,16 @@ def query_database(
     query_string: str,
     db_prefix: str = "DB",
 ) -> dict[str, Any]:
-    """Execute one SOP-authorized SELECT query."""
+    """Execute one SOP-authorized SELECT using a registered database."""
 
-    print(
-        f"[*] Executing Tool: query_database "
-        f"on {db_prefix}_NAME"
-    )
-
-    host = (
-        os.getenv(f"{db_prefix}_HOST")
-        or os.getenv("DB_HOST")
-    )
-
-    port_text = (
-        os.getenv(f"{db_prefix}_PORT")
-        or os.getenv("DB_PORT", "3306")
-    )
-
-    user = (
-        os.getenv(f"{db_prefix}_USER")
-        or os.getenv("DB_USER")
-    )
-
-    password = (
-        os.getenv(f"{db_prefix}_PASS")
-        or os.getenv(f"{db_prefix}_PASSWORD")
-        or os.getenv("DB_PASSWORD")
-    )
-
-    database = (
-        os.getenv(f"{db_prefix}_NAME")
-        or os.getenv("DB_NAME")
-    )
-
-    if not all((host, user, password, database)):
-        return _result(
-            "CONFIG_FAILURE",
-            (
-                "Database credentials are incomplete "
-                f"for prefix {db_prefix}"
-            ),
-        )
+    print(f"[*] Executing Tool: query_database on {db_prefix}")
 
     try:
-        port = int(port_text)
-    except (TypeError, ValueError):
+        target = resolve_database_target(db_prefix)
+    except TargetConfigurationError as exc:
         return _result(
             "CONFIG_FAILURE",
-            (
-                f"Database port for prefix {db_prefix} "
-                "must be an integer"
-            ),
+            str(exc),
         )
 
     connection = None
@@ -205,11 +179,11 @@ def query_database(
 
     try:
         connection = mysql.connector.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            database=database,
+            host=target.host,
+            port=target.port,
+            user=target.username,
+            password=target.password,
+            database=target.database_name,
             connection_timeout=5,
             charset="utf8mb4",
             use_unicode=True,
@@ -233,7 +207,7 @@ def query_database(
         return _result(
             "SUCCESS",
             (
-                f"SELECT completed on {database}; "
+                f"SELECT completed on {target.database_name}; "
                 f"returned {len(rows)} row(s), maximum 5"
             ),
             row_count=len(rows),
@@ -251,7 +225,7 @@ def query_database(
             "FAILED",
             (
                 f"Database query failed on "
-                f"{database}: {exc}"
+                f"{target.database_name}: {exc}"
             ),
         )
 
@@ -266,52 +240,28 @@ def query_database(
             connection.close()
 
 
-def _ssh_environment_prefix(hostname: str) -> str:
-    if hostname and hostname[0].isdigit():
-        return hostname.replace(".", "_")
-    return hostname.split(".")[0].upper()
-
-
 def run_ssh_command(hostname: str, command: str) -> dict[str, Any]:
     """Execute one already-authorized read-only command over SSH."""
 
     print(f"[*] Executing Tool: run_ssh_command on {hostname} -> {command}")
-    prefix = _ssh_environment_prefix(hostname)
-    ssh_user = os.getenv(f"{prefix}_USER") or os.getenv("DEFAULT_LINUX_USER")
-    ssh_password = os.getenv(f"{prefix}_PASS") or os.getenv(
-        "DEFAULT_LINUX_PASS"
-    )
-    known_hosts = (
-        os.getenv(f"{prefix}_KNOWN_HOSTS")
-        or os.getenv("VERIFIER_KNOWN_HOSTS")
-        or os.getenv("EXECUTOR_KNOWN_HOSTS")
-    )
 
-    if not ssh_user or not ssh_password:
+    try:
+        target = resolve_ssh_target(hostname, "VERIFIER")
+    except TargetConfigurationError as exc:
         return _result(
             "CONFIG_FAILURE",
-            f"SSH credentials are missing for {hostname}",
+            str(exc),
         )
 
     ssh = paramiko.SSHClient()
     try:
-        if known_hosts:
-            known_hosts_path = Path(known_hosts).expanduser()
-            if not known_hosts_path.is_file():
-                return _result(
-                    "CONFIG_FAILURE",
-                    f"known_hosts file does not exist: {known_hosts_path}",
-                )
-            ssh.load_host_keys(str(known_hosts_path))
-        else:
-            ssh.load_system_host_keys()
+        install_pinned_host_key(ssh, target)
 
-        # Never silently trust an unknown SSH server.
-        ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
         ssh.connect(
-            hostname=hostname,
-            username=ssh_user,
-            password=ssh_password,
+            hostname=target.hostname,
+            port=target.port,
+            username=target.username,
+            password=target.password,
             timeout=5,
             banner_timeout=5,
             auth_timeout=5,
@@ -342,15 +292,23 @@ def run_ssh_command(hostname: str, command: str) -> dict[str, Any]:
             output=output,
             error=error,
         )
+    except TargetConfigurationError as exc:
+        return _result(
+            "CONFIG_FAILURE",
+            str(exc),
+        )
     except paramiko.AuthenticationException:
         return _result(
             "AUTH_FAILURE",
-            f"Invalid SSH credentials for {hostname}",
+            f"Invalid SSH credentials for target {target.target_id}",
         )
     except (paramiko.SSHException, socket.timeout, TimeoutError, OSError) as exc:
         return _result(
             "SSH_FAILURE",
-            f"Could not complete SSH diagnostics on {hostname}: {exc}",
+            (
+                f"Could not complete SSH diagnostics on "
+                f"{target.hostname}: {exc}"
+            ),
         )
     finally:
         ssh.close()
