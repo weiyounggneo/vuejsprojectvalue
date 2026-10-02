@@ -157,14 +157,87 @@
         </div>
       </div>
 
+      <!-- ACTION BUTTONS (Moved above the table) -->
+      <div class="actions" style="margin: 0 20px 16px 20px; background: white; padding: 16px 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05); border: 1px solid #e0e6ed; justify-content: flex-start;">
+        <!-- HIDE ADD/UPDATE FROM VIEWERS -->
+        <button v-if="isEditor" class="primary-btn" @click="openAddForm" :disabled="isProcessing || isPageLoading">Add</button>
+        <button v-if="isEditor" class="primary-btn" @click="openUpdateForm" :disabled="isProcessing || isPageLoading || !selectedRow">
+          Update
+        </button>
+
+        <div v-if="isEditor" class="divider"></div>
+        <button class="view-btn" @click="openHistoryModal" :disabled="isProcessing || isPageLoading || !selectedRow">
+          View History
+        </button>
+        <button class="view-btn" v-if="isAdmin" @click="openGlobalHistoryModal" :disabled="isProcessing || isPageLoading">
+          Global Audit Log
+        </button>
+
+        <!-- NEW: MANUAL SNAPSHOT OVERRIDE -->
+        <div v-if="isAdmin" class="divider"></div>
+        <div v-if="isAdmin" style="display: flex; align-items: center; gap: 8px; padding-left: 4px;">
+          <label style="font-size: 0.85rem; font-weight: bold; color: #07254a; margin: 0;">Target Month:</label>
+          <input 
+            type="month" 
+            v-model="manualSnapshotMonth" 
+            class="inline-input" 
+            style="min-height: unset; height: 36px; width: auto; padding: 4px 8px;" 
+            :disabled="isProcessing || isPageLoading" 
+          />
+          <button 
+            class="view-btn" 
+            @click="forceSnapshot" 
+            :disabled="isProcessing || isPageLoading || !manualSnapshotMonth" 
+            style="background-color: #d93025 !important;"
+          >
+            Force Snapshot
+          </button>
+        </div>
+
+        <div class="divider"></div>
+        <button @click="setFinancialView" :disabled="isProcessing || isPageLoading" class="view-btn">
+          Financial View
+        </button>
+        <button @click="setTimelineView" :disabled="isProcessing || isPageLoading" class="view-btn">
+          Timeline View
+        </button>
+        <button @click="setGlobalView" :disabled="isProcessing || isPageLoading" class="view-btn">
+          Global View
+        </button>
+        <button @click="showColumnManager = true" :disabled="isProcessing || isPageLoading" class="view-btn">
+          Custom Columns
+        </button>
+      </div>
+
       <!-- INLINE FILTERS BAR -->
       <div class="filters-bar">
-        <div class="filter-group">
-          <label>Filter by Project Name:</label>
-          <select v-model="filters.projectName">
-            <option value="">-- All Projects --</option>
-            <option v-for="name in uniqueProjectNames" :key="name" :value="name">{{ name }}</option>
-          </select>
+        
+        <!-- SEARCHABLE DROPDOWN WITH AUTO-OPEN & ALIGNMENT -->
+        <div class="filter-group custom-dropdown-wrapper">
+          <label>Search Project Name:</label>
+          <input 
+            type="text" 
+            v-model="filters.projectName" 
+            placeholder="Type or select a project..." 
+            @focus="showProjectDropdown = true"
+            @input="showProjectDropdown = true"
+            @blur="closeProjectDropdown"
+            class="filter-input"
+          />
+          
+          <!-- Dropdown popup menu -->
+          <ul 
+            v-if="showProjectDropdown && filteredProjectNames.length > 0" 
+            class="custom-dropdown-menu"
+          >
+            <li 
+              v-for="name in filteredProjectNames" 
+              :key="name"
+              @mousedown.prevent="selectProject(name)"
+            >
+              {{ name }}
+            </li>
+          </ul>
         </div>
 
         <div class="filter-group">
@@ -175,21 +248,25 @@
           </select>
         </div>
 
+        <!-- SITE FILTER & CLEAR BUTTON GROUPED TOGETHER -->
         <div class="filter-group">
           <label>Filter by Site:</label>
-          <select v-model="filters.site">
-            <option value="">-- All Sites --</option>
-            <option v-for="site in uniqueSites" :key="site" :value="site">{{ site }}</option>
-          </select>
+          <div style="display: flex; gap: 8px;">
+            <select v-model="filters.site" style="flex: 1;">
+              <option value="">-- All Sites --</option>
+              <option v-for="site in uniqueSites" :key="site" :value="site">{{ site }}</option>
+            </select>
+            <button class="cancel" style="padding: 8px 16px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; color: white;" @click="clearFilters">
+              Clear Filters
+            </button>
+          </div>
         </div>
 
-        <button class="actions cancel" style="margin-top: 0; margin-bottom: 2px;" @click="clearFilters">
-          Clear Filters
-        </button>
       </div>
 
       <div class="table-section">
-        <div class="inline-edit-hint">
+        <!-- HIDE EDIT HINT FROM VIEWERS -->
+        <div v-if="isEditor" class="inline-edit-hint">
           💡 <strong>Tip:</strong> Double-click any cell below to input or update its value directly. For multiple sites, separate them with commas (e.g., BSK, MUA). Use the preset view buttons below to quickly show or hide metadata.
         </div>
 
@@ -249,7 +326,7 @@
                   v-else
                   @dblclick.stop="startInlineEdit(props.row, props.column.field, props.row[props.column.field])"
                   class="editable-cell"
-                  title="Double-click to edit"
+                  :title="isEditor ? 'Double-click to edit' : ''"
                 >
                   <template v-if="props.column.formatType === 'currency'">
                     {{ formatCurrency(props.row[props.column.field]) }}
@@ -272,39 +349,6 @@
             </template>
           </vue-good-table>
         </div>
-      </div>
-
-      <!-- ACTION BUTTONS -->
-      <div class="actions">
-        <button class="primary-btn" @click="openAddForm" :disabled="isProcessing || isPageLoading">Add</button>
-        <button class="primary-btn" @click="openUpdateForm" :disabled="isProcessing || isPageLoading || !selectedRow">
-          Update
-        </button>
-
-        <div class="divider"></div>
-        <button class="view-btn" @click="openHistoryModal" :disabled="isProcessing || isPageLoading || !selectedRow">
-          View History
-        </button>
-        <button class="view-btn" v-if="isAdmin" @click="openGlobalHistoryModal" :disabled="isProcessing || isPageLoading">
-          Global Audit Log
-        </button>
-
-        <div class="divider"></div>
-        <button @click="setFinancialView" :disabled="isProcessing || isPageLoading" class="view-btn">
-          Financial View
-        </button>
-        <button @click="setTimelineView" :disabled="isProcessing || isPageLoading" class="view-btn">
-          Timeline View
-        </button>
-        <button @click="setGlobalView" :disabled="isProcessing || isPageLoading" class="view-btn">
-          Global View
-        </button>
-        <button @click="showColumnManager = true" :disabled="isProcessing || isPageLoading" class="view-btn">
-          Custom Columns
-        </button>
-
-        <div class="divider"></div>
-        <button @click="clearTableUI" :disabled="isProcessing || isPageLoading">Clear Selection</button>
       </div>
 
       <!-- SELECTED ROW INFO PANEL -->
@@ -591,7 +635,8 @@
         <div class="chart-card">
           <div class="chart-header" style="flex-direction: column; align-items: flex-start; gap: 8px;">
             <h3 class="chart-title">Milestone Tracking</h3>
-            <div class="inline-edit-hint" style="margin: 0; padding: 8px 12px; font-size: 0.85rem; width: 100%; box-sizing: border-box;">
+            <!-- HIDE EDIT HINT FROM VIEWERS -->
+            <div v-if="isEditor" class="inline-edit-hint" style="margin: 0; padding: 8px 12px; font-size: 0.85rem; width: 100%; box-sizing: border-box;">
               💡 <strong>Tip:</strong> Double-click any Target or Actual date below to update it directly.
             </div>
           </div>
@@ -600,7 +645,7 @@
               <thead style="position: sticky; top: 0; z-index: 10;">
                 <tr>
                   <th>Project Name</th>
-                  <th>Current Status</th>
+                  
                   <th>Target G1</th>
                   <th>Actual G1</th>
                   <th>Target G2</th>
@@ -614,14 +659,14 @@
               <tbody>
                 <tr v-for="item in filteredTimelineRows" :key="item.projectId">
                   <td><strong>{{ item.projectName }}</strong></td>
-                  <td><span class="badge">{{ item.projectStatus || '-' }}</span></td>
+                  <td><span class="badge">{{ item.currentPmoGate || '-' }}</span></td>
                   
                   <!-- Target G1 -->
                   <td>
                     <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'targetG1Date'">
                       <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
                     </div>
-                    <div v-else @dblclick.stop="startInlineEdit(item, 'targetG1Date', item.targetG1Date)" class="editable-cell" title="Double-click to edit">
+                    <div v-else @dblclick.stop="startInlineEdit(item, 'targetG1Date', item.targetG1Date)" class="editable-cell" :title="isEditor ? 'Double-click to edit' : ''">
                       {{ formatDate(item.targetG1Date) }}
                     </div>
                   </td>
@@ -631,7 +676,7 @@
                     <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualG1Date'">
                       <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
                     </div>
-                    <div v-else @dblclick.stop="startInlineEdit(item, 'actualG1Date', item.actualG1Date)" class="editable-cell" title="Double-click to edit">
+                    <div v-else @dblclick.stop="startInlineEdit(item, 'actualG1Date', item.actualG1Date)" class="editable-cell" :title="isEditor ? 'Double-click to edit' : ''">
                       <strong>{{ item.actualG1Date ? formatDate(item.actualG1Date) : 'Pending' }}</strong>
                     </div>
                   </td>
@@ -641,7 +686,7 @@
                     <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'targetG2Date'">
                       <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
                     </div>
-                    <div v-else @dblclick.stop="startInlineEdit(item, 'targetG2Date', item.targetG2Date)" class="editable-cell" title="Double-click to edit">
+                    <div v-else @dblclick.stop="startInlineEdit(item, 'targetG2Date', item.targetG2Date)" class="editable-cell" :title="isEditor ? 'Double-click to edit' : ''">
                       {{ formatDate(item.targetG2Date) }}
                     </div>
                   </td>
@@ -651,7 +696,7 @@
                     <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualG2Date'">
                       <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
                     </div>
-                    <div v-else @dblclick.stop="startInlineEdit(item, 'actualG2Date', item.actualG2Date)" class="editable-cell" title="Double-click to edit">
+                    <div v-else @dblclick.stop="startInlineEdit(item, 'actualG2Date', item.actualG2Date)" class="editable-cell" :title="isEditor ? 'Double-click to edit' : ''">
                       <strong>{{ item.actualG2Date ? formatDate(item.actualG2Date) : 'Pending' }}</strong>
                     </div>
                   </td>
@@ -661,7 +706,7 @@
                     <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'targetG3Date'">
                       <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
                     </div>
-                    <div v-else @dblclick.stop="startInlineEdit(item, 'targetG3Date', item.targetG3Date)" class="editable-cell" title="Double-click to edit">
+                    <div v-else @dblclick.stop="startInlineEdit(item, 'targetG3Date', item.targetG3Date)" class="editable-cell" :title="isEditor ? 'Double-click to edit' : ''">
                       {{ formatDate(item.targetG3Date) }}
                     </div>
                   </td>
@@ -671,7 +716,7 @@
                     <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualG3Date'">
                       <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
                     </div>
-                    <div v-else @dblclick.stop="startInlineEdit(item, 'actualG3Date', item.actualG3Date)" class="editable-cell" title="Double-click to edit">
+                    <div v-else @dblclick.stop="startInlineEdit(item, 'actualG3Date', item.actualG3Date)" class="editable-cell" :title="isEditor ? 'Double-click to edit' : ''">
                       <strong>{{ item.actualG3Date ? formatDate(item.actualG3Date) : 'Pending' }}</strong>
                     </div>
                   </td>
@@ -681,7 +726,7 @@
                     <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'targetClosedDate'">
                       <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
                     </div>
-                    <div v-else @dblclick.stop="startInlineEdit(item, 'targetClosedDate', item.targetClosedDate)" class="editable-cell" title="Double-click to edit">
+                    <div v-else @dblclick.stop="startInlineEdit(item, 'targetClosedDate', item.targetClosedDate)" class="editable-cell" :title="isEditor ? 'Double-click to edit' : ''">
                       {{ formatDate(item.targetClosedDate) }}
                     </div>
                   </td>
@@ -691,7 +736,7 @@
                     <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualClosedDate'">
                       <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
                     </div>
-                    <div v-else @dblclick.stop="startInlineEdit(item, 'actualClosedDate', item.actualClosedDate)" class="editable-cell" title="Double-click to edit">
+                    <div v-else @dblclick.stop="startInlineEdit(item, 'actualClosedDate', item.actualClosedDate)" class="editable-cell" :title="isEditor ? 'Double-click to edit' : ''">
                       <strong>{{ item.actualClosedDate ? formatDate(item.actualClosedDate) : 'Pending' }}</strong>
                     </div>
                   </td>
@@ -772,11 +817,7 @@
               <label for="projectStatus">Project Status</label>
               <select id="projectStatus" v-model="activeForm.projectStatus" :disabled="isProcessing">
                 <option value="">(Blank)</option>
-                <option value="Ongoing">Ongoing</option>
-                <option value="Closed">Closed</option>
-                <option value="G1">G1</option>
-                <option value="G2">G2</option>
-                <option value="G3">G3</option>
+                <option v-for="status in configOptions.STATUS" :key="status" :value="status">{{ status }}</option>
               </select>
             </div>
 
@@ -784,9 +825,7 @@
               <label for="pillars">Pillars</label>
               <select id="pillars" v-model="activeForm.pillars" :disabled="isProcessing">
                 <option value="">(Blank)</option>
-                <option value="Process & Equipment Intelligence">Process & Equipment Intelligence</option>
-                <option value="Smart Decision Hub">Smart Decision Hub</option>
-                <option value="Vision Intelligence">Vision Intelligence</option>
+                <option v-for="pillar in configOptions.PILLAR" :key="pillar" :value="pillar">{{ pillar }}</option>
               </select>
             </div>
 
@@ -794,27 +833,25 @@
               <label>Sites (Select Multiple)</label>
               <div class="checkbox-group">
                 <label><input type="checkbox" value="ALL" v-model="activeForm.sitesArray" :disabled="isProcessing"> ALL</label>
-                <label><input type="checkbox" value="BSK" v-model="activeForm.sitesArray" :disabled="isProcessing"> BSK</label>
-                <label><input type="checkbox" value="CAL" v-model="activeForm.sitesArray" :disabled="isProcessing"> CAL</label>
-                <label><input type="checkbox" value="CLB" v-model="activeForm.sitesArray" :disabled="isProcessing"> CLB</label>
-                <label><input type="checkbox" value="KIR" v-model="activeForm.sitesArray" :disabled="isProcessing"> KIR</label>
-                <label><input type="checkbox" value="MAL" v-model="activeForm.sitesArray" :disabled="isProcessing"> MAL</label>
-                <label><input type="checkbox" value="MUA" v-model="activeForm.sitesArray" :disabled="isProcessing"> MUA</label>
-                <label><input type="checkbox" value="STS" v-model="activeForm.sitesArray" :disabled="isProcessing"> STS</label>
+                <label v-for="site in configOptions.SITE" :key="site">
+                  <input type="checkbox" :value="site" v-model="activeForm.sitesArray" :disabled="isProcessing"> {{ site }}
+                </label>
               </div>
             </div>
 
             <div class="form-group">
               <label for="currentPmoGate">Current PMO Gate</label>
-              <input id="currentPmoGate" type="text" v-model="activeForm.currentPmoGate" :disabled="isProcessing" />
+              <select id="currentPmoGate" v-model="activeForm.currentPmoGate" :disabled="isProcessing">
+                <option value="">(Blank)</option>
+                <option v-for="gate in configOptions.PMOGATE" :key="gate" :value="gate">{{ gate }}</option>
+              </select>
             </div>
 
             <div class="form-group">
               <label for="dtitInvolved">DTIT Involved</label>
               <select id="dtitInvolved" v-model="activeForm.dtitInvolved" :disabled="isProcessing">
                 <option value="">(Blank)</option>
-                <option value="Yes">Yes</option>
-                <option value="No">No</option>
+                <option v-for="opt in configOptions.DTIT" :key="opt" :value="opt">{{ opt }}</option>
               </select>
             </div>
 
@@ -822,9 +859,7 @@
               <label for="aiAaAType">AI/AA/A type</label>
               <select id="aiAaAType" v-model="activeForm.aiAaAType" :disabled="isProcessing">
                 <option value="">(Blank)</option>
-                <option value="AI">AI</option>
-                <option value="AA">AA</option>
-                <option value="A">A</option>
+                <option v-for="opt in configOptions.AITYPE" :key="opt" :value="opt">{{ opt }}</option>
               </select>
             </div>
 
@@ -832,8 +867,7 @@
               <label for="foakNoak">FOAK/NOAK</label>
               <select id="foakNoak" v-model="activeForm.foakNoak" :disabled="isProcessing">
                 <option value="">(Blank)</option>
-                <option value="FOAK">FOAK</option>
-                <option value="NOAK">NOAK</option>
+                <option v-for="opt in configOptions.FOAKNOAK" :key="opt" :value="opt">{{ opt }}</option>
               </select>
             </div>
           </div>
@@ -851,16 +885,16 @@
                 :disabled="isProcessing"
               />
             </div>
+            
+            <div class="form-group full-width">
+              <label for="comment">Comment</label>
+              <input id="comment" type="text" v-model="activeForm.comment" :disabled="isProcessing" />
+            </div>
           </div>
 
           <!-- SECTION 3: KPIs -->
           <h4 class="section-heading">3. Key Performance Indicators</h4>
           <div class="form-grid">
-            <div class="form-group full-width">
-              <label for="comment">Comment</label>
-              <input id="comment" type="text" v-model="activeForm.comment" :disabled="isProcessing" />
-            </div>
-
             <div class="form-group">
               <label for="capacityGainValue">Capacity Gain Value</label>
               <input id="capacityGainValue" type="number" step="any" v-model="activeForm.capacityGainValue" :disabled="isProcessing" />
@@ -982,6 +1016,7 @@
                 <th>Changed By</th>
                 <th>Status (Action)</th>
                 <th>Proj. Status</th>
+                <th>PMO Gate</th>
                 <th>Comment</th>
                 <th>Cap. Gain Val</th>
                 <th>Cap. Gain %</th>
@@ -1008,8 +1043,9 @@
                     <span class="badge" :class="{ 'badge-current': log.action_type === 'CURRENT' }">
                       {{ log.action_type === 'UPDATE' ? 'PREVIOUS' : log.action_type }}
                     </span>
+                    <!-- REQUIRE isEditor TO SEE RESTORE BUTTON -->
                     <button
-                      v-if="log.action_type !== 'CURRENT'"
+                      v-if="isEditor && log.action_type !== 'CURRENT'"
                       class="restore-btn"
                       @click="restoreHistoricalRecord(log)"
                       title="Revert live record to this version"
@@ -1019,6 +1055,7 @@
                   </div>
                 </td>
                 <td>{{ log.project_status || '-' }}</td>
+                <td>{{ log.current_pmo_gate || '-' }}</td>
                 <td>{{ log.comment_text }}</td>
                 <td>{{ formatCurrency(log.capacity_gain_value) }}</td>
                 <td>{{ formatPercent(log.capacity_gain_pct) }}</td>
@@ -1070,8 +1107,9 @@
                   <span class="badge" :class="{ 'badge-current': props.row.action_type === 'CURRENT' }">
                     {{ props.row.action_type === 'UPDATE' ? 'PREVIOUS' : props.row.action_type }}
                   </span>
+                  <!-- REQUIRE isEditor TO SEE RESTORE BUTTON -->
                   <button
-                    v-if="props.row.action_type !== 'CURRENT'"
+                    v-if="isEditor && props.row.action_type !== 'CURRENT'"
                     class="restore-btn"
                     @click="restoreHistoricalRecord(props.row)"
                     title="Revert live record to this version"
@@ -1156,9 +1194,22 @@ export default {
     }
   },
   data() {
-    const currentYear = new Date().getFullYear();
+    const currentDate = new Date();
+    const currentYear = currentDate.getFullYear();
+    const currentMonthString = `${currentYear}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
 
     return {
+      // NEW: Dynamic Configuration Options from Backend
+      configOptions: {
+        SITE: [],
+        PILLAR: [],
+        STATUS: ['Ongoing', 'Cancelled', 'Closed', 'On-Hold'],
+        PMOGATE: ['G1', 'G2', 'G2.5', 'G3', 'Closure'],
+        DTIT: ['Yes', 'No'],
+        AITYPE: ['AI', 'AA', 'A'],
+        FOAKNOAK: ['FOAK', 'NOAK']
+      },
+
       // Timeline Window: Default to N-1 to N+3
       currentYear,
       defaultTimelineStart: currentYear - 1,
@@ -1188,10 +1239,16 @@ export default {
       showSuccessDialog: false,
       successMessage: '',
 
+      // Dropdown UI state
+      showProjectDropdown: false,
+
       // UI State
       showAddForm: false,
       showUpdateForm: false,
       showColumnManager: false,
+      
+      // NEW: Manual Snapshot Month Value
+      manualSnapshotMonth: currentMonthString,
 
       // History UI State
       showHistoryModal: false,
@@ -1236,6 +1293,11 @@ export default {
     isAdmin() {
       return localStorage.getItem('access_right') === 'admin';
     },
+    // Check if the user is allowed to edit data
+    isEditor() {
+      const role = localStorage.getItem('access_right');
+      return role === 'admin' || role === 'user';
+    },
 
     activeForm() {
       return this.showAddForm ? this.addForm : this.updateForm;
@@ -1266,6 +1328,7 @@ export default {
         { label: 'Project ID', field: 'project_id', width: '100px' },
         { label: 'Project Name', field: 'project_name', width: '150px' },
         { label: 'Proj. Status', field: 'project_status', width: '110px' },
+        { label: 'PMO Gate', field: 'current_pmo_gate', width: '100px' },
         { label: 'Comment', field: 'comment_text', width: '200px' },
         { label: 'Cap. Gain Val', field: 'capacity_gain_value', formatFn: this.formatCurrency, width: '120px' },
         { label: 'Cap. Gain %', field: 'capacity_gain_pct', formatFn: this.formatPercent, width: '100px' },
@@ -1286,6 +1349,15 @@ export default {
     uniqueProjectNames() {
       return [...new Set(this.rows.map(r => r.projectName).filter(Boolean))].sort();
     },
+    filteredProjectNames() {
+      const query = (this.filters.projectName || '').toLowerCase().trim();
+      if (!query) {
+        return this.uniqueProjectNames;
+      }
+      return this.uniqueProjectNames.filter(name =>
+        name.toLowerCase().includes(query)
+      );
+    },
     uniquePillars() {
       return [...new Set(this.rows.map(r => r.pillars).filter(Boolean))].sort();
     },
@@ -1303,7 +1375,9 @@ export default {
     },
     filteredRows() {
       return this.rows.filter(row => {
-        const matchName = !this.filters.projectName || row.projectName === this.filters.projectName;
+        const matchName = !this.filters.projectName || 
+          (row.projectName && row.projectName.toLowerCase().includes(this.filters.projectName.toLowerCase()));
+          
         const matchPillar = !this.filters.pillar || row.pillars === this.filters.pillar;
         
         let matchSite = true;
@@ -1347,14 +1421,15 @@ export default {
         result.Overall.count += 1;
         result.Overall.value += projectValue;
 
-        const status = String(row.projectStatus || '').trim().toUpperCase();
-        if (status === 'G1') {
+        // NEW LOGIC: Target the PMO Gate instead of Project Status
+        const gate = String(row.currentPmoGate || '').trim().toUpperCase();
+        if (gate === 'G1') {
           result.G1.count += 1;
           result.G1.value += projectValue;
-        } else if (status === 'G2') {
+        } else if (gate === 'G2' || gate === 'G2.5') { // Included G2.5 in G2 bucket, adjust if needed
           result.G2.count += 1;
           result.G2.value += projectValue;
-        } else if (status === 'G3') {
+        } else if (gate === 'G3') {
           result.G3.count += 1;
           result.G3.value += projectValue;
         }
@@ -1631,7 +1706,7 @@ export default {
         },
         yaxis: { labels: { style: { fontSize: '13px', fontWeight: 600 } } },
         legend: { position: 'top', horizontalAlign: 'left' },
-        tooltip: { x: { format: 'dd MMM yyyy' } },
+        tooltip: { x: { format: 'MM-yyyy' } },
         noData: { text: 'No timeline data available for selected filters.' }
       };
     },
@@ -1674,9 +1749,56 @@ export default {
       return this.$router.push('/login');
     }
 
-    await this.fetchTable();
+    // NEW: Fetch dynamic options along with table data
+    await Promise.all([
+      this.fetchTable(),
+      this.fetchConfigOptions()
+    ]);
   },
   methods: {
+    // -------------------------------------------------
+    // DROPDOWN METHODS
+    // -------------------------------------------------
+    selectProject(name) {
+      this.filters.projectName = name;
+      this.showProjectDropdown = false;
+    },
+    closeProjectDropdown() {
+      // Small timeout allows click events on list items to register first
+      setTimeout(() => {
+        this.showProjectDropdown = false;
+      }, 150);
+    },
+
+    // -------------------------------------------------
+    // NEW: FETCH MASTER DATA OPTIONS
+    // -------------------------------------------------
+    async fetchConfigOptions() {
+      try {
+        const response = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/config/options`);
+        if (response.ok) {
+          const data = await response.json();
+          // Map the exact database category names (e.g. data.SITE) to the Vue state
+          this.configOptions.SITE = data.SITE || ['BSK', 'CAL', 'CLB', 'KIR', 'MAL', 'MUA', 'STS'];
+          this.configOptions.PILLAR = data.PILLAR || ['Process & Equipment Intelligence', 'Smart Decision Hub', 'Vision Intelligence'];
+          this.configOptions.STATUS = data.PROJECT_STATUS || ['Ongoing', 'Cancelled', 'Closed', 'On-Hold'];
+          this.configOptions.PMOGATE = data.PMOGATE || ['G1', 'G2', 'G2.5', 'G3', 'Closure'];
+          this.configOptions.DTIT = data.DTIT_INVOLVED || ['Yes', 'No'];
+          this.configOptions.AITYPE = data.AI_AA_A_TYPE || ['AI', 'AA', 'A'];
+          this.configOptions.FOAKNOAK = data.FOAK_NOAK || ['FOAK', 'NOAK'];
+        }
+      } catch (err) {
+        console.error("Failed to load config options. Using safe default fallbacks.", err);
+        this.configOptions.SITE = ['BSK', 'CAL', 'CLB', 'KIR', 'MAL', 'MUA', 'STS'];
+        this.configOptions.PILLAR = ['Process & Equipment Intelligence', 'Smart Decision Hub', 'Vision Intelligence'];
+        this.configOptions.STATUS = ['Ongoing', 'Cancelled', 'Closed', 'On-Hold'];
+        this.configOptions.PMOGATE = ['G1', 'G2', 'G2.5', 'G3', 'Closure'];
+        this.configOptions.DTIT = ['Yes', 'No'];
+        this.configOptions.AITYPE = ['AI', 'AA', 'A'];
+        this.configOptions.FOAKNOAK = ['FOAK', 'NOAK'];
+      }
+    },
+
     // -------------------------------------------------
     // PDF EXPORT
     // -------------------------------------------------
@@ -2128,7 +2250,15 @@ export default {
     },
     formatDate(val) {
       if (!val) return '-';
-      return String(val).slice(0, 10);
+      
+      const dateObj = new Date(val);
+      // Fallback if the date is invalid
+      if (isNaN(dateObj.getTime())) return String(val).slice(0, 10); 
+      
+      const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const yyyy = dateObj.getFullYear();
+      
+      return `${mm}-${yyyy}`;
     },
     getRagClass(actual, target) {
       if (!actual || !target) return 'pending-cell';
@@ -2149,6 +2279,41 @@ export default {
     // -------------------------------------------------
     // AUDIT AND HISTORY METHODS
     // -------------------------------------------------
+    
+    // NEW: MANUAL SNAPSHOT METHOD
+    async forceSnapshot() {
+      if (!this.manualSnapshotMonth) return alert('Please select a target month first.');
+
+      const confirmed = confirm(`WARNING: Are you sure you want to manually trigger and overwrite the KPI snapshot for ${this.manualSnapshotMonth}?\n\nThis will take the current live values of all projects and permanently stamp them to this month in the database.`);
+      
+      if (!confirmed) return;
+
+      this.isProcessing = true;
+      this.processingMessage = `Capturing full portfolio snapshot for ${this.manualSnapshotMonth}...`;
+
+      try {
+        const response = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/admin/force-snapshot`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ snapshotMonth: this.manualSnapshotMonth })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.message || 'Failed to capture snapshot.');
+        }
+
+        this.successMessage = result.message || `Manual snapshot for ${this.manualSnapshotMonth} synchronized successfully!`;
+        this.showSuccessDialog = true;
+      } catch (err) {
+        alert('Snapshot override failed: ' + err.message);
+      } finally {
+        this.isProcessing = false;
+        this.processingMessage = '';
+      }
+    },
+
     async openHistoryModal() {
       if (!this.selectedRow || !this.selectedRow.projectId) {
         return alert('Please select a row first.');
@@ -2178,6 +2343,7 @@ export default {
           action_type: 'CURRENT',
           project_name: this.selectedRow.projectName,
           project_status: this.selectedRow.projectStatus,
+          current_pmo_gate: this.selectedRow.currentPmoGate,
           capacity_gain_value: this.selectedRow.capacityGainValue,
           capacity_gain_pct: this.selectedRow.capacityGainPercent,
           dl_value: this.selectedRow.dlValue,
@@ -2225,6 +2391,7 @@ export default {
             project_id: row.projectId,
             project_name: row.projectName,
             project_status: row.projectStatus,
+            current_pmo_gate: row.currentPmoGate,
             capacity_gain_value: row.capacityGainValue,
             capacity_gain_pct: row.capacityGainPercent,
             dl_value: row.dlValue,
@@ -2274,6 +2441,7 @@ export default {
         const payload = {
           projectName: log.project_name,
           projectStatus: log.project_status,
+          currentPmoGate: log.current_pmo_gate,
           comment: log.comment_text || log.comments,
           capacityGainValue: log.capacity_gain_value,
           capacityGainPercent: log.capacity_gain_pct,
@@ -2322,6 +2490,9 @@ export default {
     // INLINE EDITING
     // -------------------------------------------------
     startInlineEdit(row, field, currentValue) {
+      // Instantly block viewers from triggering the edit mode
+      if (!this.isEditor) return; 
+
       this.editingCell = { rowId: row.projectId, field };
       
       // Standardize date fields for the input calendar UI if it's a date field
@@ -2393,7 +2564,7 @@ export default {
         projectStatus: '',
         pillars: '',
         sites: '', 
-        sitesArray: [], 
+        sitesArray: [],
         currentPmoGate: '',
         dtitInvolved: '',
         aiAaAType: '',
@@ -2982,11 +3153,61 @@ export default {
   color: #333;
 }
 
+/* Custom Searchable Dropdown Styling */
+.custom-dropdown-wrapper {
+  position: relative;
+}
+
+.filter-input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  background-color: #fff;
+  box-sizing: border-box;
+}
+
+.custom-dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 1050;
+  background: #ffffff;
+  border: 1px solid #c2d5ee;
+  border-radius: 0 0 6px 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 2px 0 0 0;
+  padding: 0;
+  list-style: none;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.12);
+}
+
+.custom-dropdown-menu li {
+  padding: 8px 12px;
+  font-size: 0.9rem;
+  color: #333;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f4f8;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.custom-dropdown-menu li:last-child {
+  border-bottom: none;
+}
+
+.custom-dropdown-menu li:hover {
+  background-color: #e7edf5;
+  color: #1f5fa8;
+  font-weight: 600;
+}
+
 /* Buttons inside the Tab */
 .actions {
   display: flex;
   gap: 12px;
-  margin: 16px 20px;
   flex-wrap: wrap;
   align-items: center;
 }
