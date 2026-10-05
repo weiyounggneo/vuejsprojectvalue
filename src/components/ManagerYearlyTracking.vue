@@ -398,7 +398,11 @@
           </div>
         </div>
 
-        <!-- EXECUTIVE CARDS SECTION -->
+        <!-- EXECUTIVE CARDS SECTION (cardsStartYear to current year) -->
+        <div class="cards-year-bar">
+          <span class="sidebar-title">Cards show cumulative values for {{ cardsRangeLabel }}</span>
+        </div>
+
         <div class="executive-cards-section">
           <div class="metric-card bg-overall">
             <h4>Overall</h4>
@@ -1221,6 +1225,9 @@ export default {
         endYear: currentYear + 3
       },
 
+      // First year included in the 4 executive cards (runs through the current year)
+      cardsStartYear: 2025,
+
       // Analytics global chart filter
       dashboardFilter: {
         selectedSite: 'ALL'
@@ -1320,6 +1327,16 @@ export default {
       return `${this.timelineConfig.startYear} - ${this.timelineConfig.endYear}`;
     },
 
+    // Years summed by the 4 executive cards: cardsStartYear up to the current year
+    cardYears() {
+      const start = Math.min(this.cardsStartYear, this.currentYear);
+      return Array.from({ length: this.currentYear - start + 1 }, (_, i) => start + i);
+    },
+    cardsRangeLabel() {
+      const years = this.cardYears;
+      return years.length === 1 ? String(years[0]) : `${years[0]} - ${years[years.length - 1]}`;
+    },
+
     globalHistoryColumns() {
       return [
         { label: 'Date Changed', field: 'changed_at', width: '160px' },
@@ -1402,7 +1419,7 @@ export default {
     },
 
     // ==========================================
-    // EXECUTIVE CARDS DATA (Filtered)
+    // EXECUTIVE CARDS DATA (Site-filtered, CURRENT YEAR ONLY)
     // ==========================================
     executiveCardsData() {
       const result = {
@@ -1412,16 +1429,16 @@ export default {
         G3: { count: 0, value: 0 }
       };
 
+      // Sums cardsStartYear..currentYear directly, so it does not depend on the Timeline Window.
+      const yearKeys = this.cardYears.map(y => `year${y}`);
+
       this.filteredDashboardRows.forEach(row => {
-        let projectValue = 0;
-        this.trackingYears.forEach(year => {
-          projectValue += Number(row[`year${year}`]) || 0;
-        });
+        const projectValue = yearKeys.reduce((sum, key) => sum + (Number(row[key]) || 0), 0);
 
         result.Overall.count += 1;
         result.Overall.value += projectValue;
 
-        // NEW LOGIC: Target the PMO Gate instead of Project Status
+        // Target the PMO Gate instead of Project Status
         const gate = String(row.currentPmoGate || '').trim().toUpperCase();
         if (gate === 'G1') {
           result.G1.count += 1;
@@ -2914,6 +2931,13 @@ export default {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* Label above the executive cards */
+.cards-year-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 /* Timeline Specific Styles */
