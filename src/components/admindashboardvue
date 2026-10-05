@@ -1,0 +1,1132 @@
+<template>
+  <div class="table-gui-page">
+    <!-- Loading Overlay -->
+    <div v-if="isPageLoading" class="loading-overlay">
+      <div class="loading-box">
+        <div class="spinner"></div>
+        <div class="loading-text">Loading data, please wait...</div>
+      </div>
+    </div>
+
+    <!-- Processing Overlay -->
+    <div v-if="isProcessing && !isPageLoading" class="loading-overlay">
+      <div class="loading-box">
+        <div class="loading-text">{{ processingMessage || 'Processing, please wait...' }}</div>
+        <div class="loading-subtext">Please do not refresh or close the page.</div>
+        <div class="loading-bar-wrapper">
+          <div class="loading-bar-indeterminate"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Top Bar -->
+    <header class="top-bar">
+      <div class="left">
+        <img src="@/assets/st-logo.png" alt="ST Logo" class="logo" />
+        <span class="title">
+          Project Value Calculation:<br />
+          System Administration
+        </span>
+      </div>
+
+      <div class="topbar-actions">
+        <button class="back-btn" @click="goBack" :disabled="isProcessing || isPageLoading">Back</button>
+        <button class="home-btn" @click="goHome" :disabled="isProcessing || isPageLoading">Home</button>
+        <button class="logout-btn" @click="logout" :disabled="isProcessing || isPageLoading">Logout</button>
+      </div>
+    </header>
+
+    <div class="banner">System Administration & Access Control</div>
+
+    <!-- NAVIGATION TABS -->
+    <div class="tabs-container">
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'users' }"
+        @click="activeTab = 'users'"
+      >
+        User Access Management
+      </button>
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'config' }"
+        @click="activeTab = 'config'"
+      >
+        Master Data Configuration
+      </button>
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'targets' }"
+        @click="activeTab = 'targets'"
+      >
+        Site Targets
+      </button>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 1: USER MANAGEMENT                     -->
+    <!-- ========================================== -->
+    <div v-show="activeTab === 'users'" class="table-section" style="padding-top: 20px;">
+      
+      <div class="config-controls">
+        <div class="form-group">
+          <p style="margin: 0; color: #07254a; font-size: 0.95rem;">
+            💡 <strong>Tip:</strong> Double-click a user's 'Access Right' below to instantly change it, or add a new user proactively.
+          </p>
+        </div>
+        <button class="primary-btn" @click="openAddUserModal" :disabled="isProcessing">
+          + Add New User
+        </button>
+      </div>
+
+      <vue-good-table
+        :columns="userColumns"
+        :rows="users"
+        :pagination-options="{ enabled: true, perPage: 10 }"
+        :search-options="{ enabled: true, placeholder: 'Search users...' }"
+        :line-numbers="true"
+      >
+        <template #table-row="props">
+          <span v-if="props.column.field === 'access_right'">
+            <!-- Editing Mode -->
+            <span v-if="editingCell.rowId === props.row.username && editingCell.field === 'access_right'">
+              <select
+                v-model="editValue"
+                @blur="saveUserRole(props.row)"
+                @keyup.enter="saveUserRole(props.row)"
+                @keyup.esc="cancelInlineEdit"
+                v-focus
+                class="inline-input"
+              >
+                <option v-for="role in availableRoles" :key="role" :value="role">{{ role }}</option>
+              </select>
+            </span>
+            
+            <!-- Viewing Mode -->
+            <span 
+              v-else 
+              @dblclick.stop="startInlineEdit(props.row.username, 'access_right', props.row.access_right)" 
+              class="editable-cell"
+              title="Double-click to edit role"
+            >
+              <span class="status-badge" :class="'role-' + props.row.access_right">
+                {{ props.row.access_right.toUpperCase() }}
+              </span>
+            </span>
+          </span>
+
+          <span v-else-if="props.column.field === 'updated_at'">
+            {{ formatDate(props.row.updated_at) }}
+          </span>
+
+          <span v-else>
+            {{ props.formattedRow[props.column.field] }}
+          </span>
+        </template>
+
+        <template #emptystate>
+          <div class="no-data-message">No users found in the system.</div>
+        </template>
+      </vue-good-table>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 2: SYSTEM CONFIGURATION                -->
+    <!-- ========================================== -->
+    <div v-show="activeTab === 'config'" class="table-section" style="padding-top: 20px;">
+      
+      <div class="config-controls">
+        <div class="form-group" style="max-width: 300px;">
+          <label for="categorySelect">Select Master Data Category:</label>
+          <select id="categorySelect" v-model="selectedCategory" class="category-select" :disabled="availableCategories.length === 0">
+            <option v-if="availableCategories.length === 0" value="">-- No Categories Exist --</option>
+            <option v-for="cat in availableCategories" :key="cat" :value="cat">
+              {{ formatCategoryName(cat) }}
+            </option>
+          </select>
+        </div>
+        
+        <button class="primary-btn" @click="openAddConfigModal" :disabled="isProcessing">
+          + Add New Option
+        </button>
+      </div>
+
+      <div class="config-grid">
+        <div v-if="availableCategories.length === 0" class="no-data-message" style="margin-top: 20px;">
+          No master data categories found in the database. Click "+ Add New Option" to create your first category.
+        </div>
+
+        <vue-good-table
+          v-else
+          :columns="configColumns"
+          :rows="filteredConfigOptions"
+          :pagination-options="{ enabled: true, perPage: 10 }"
+          :line-numbers="true"
+        >
+          <template #emptystate>
+            <div class="no-data-message">No options exist for {{ formatCategoryName(selectedCategory) }}. Add one above.</div>
+          </template>
+        </vue-good-table>
+      </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 3: SITE TARGETS                        -->
+    <!-- ========================================== -->
+    <div v-show="activeTab === 'targets'" class="table-section" style="padding-top: 20px;">
+      
+      <div class="config-controls">
+        <div class="form-group">
+          <p style="margin: 0; color: #07254a; font-size: 0.95rem;">
+            💡 <strong>Tip:</strong> Double-click any 'Expected Value' below to update it directly, or add a new target. 
+          </p>
+        </div>
+        <button class="primary-btn" @click="openAddTargetModal" :disabled="isProcessing">
+          + Add Site Target
+        </button>
+      </div>
+
+      <vue-good-table
+        :columns="targetColumns"
+        :rows="siteTargets"
+        :pagination-options="{ enabled: true, perPage: 10 }"
+        :search-options="{ enabled: true, placeholder: 'Search by site or year...' }"
+        :line-numbers="true"
+      >
+        <template #table-row="props">
+          <span v-if="props.column.field === 'expected_value'">
+            <!-- Editing Mode -->
+            <span v-if="editingCell.rowId === `${props.row.site}_${props.row.target_year}` && editingCell.field === 'expected_value'">
+              <input
+                type="number"
+                v-model="editValue"
+                @blur="saveSiteTarget(props.row)"
+                @keyup.enter="saveSiteTarget(props.row)"
+                @keyup.esc="cancelInlineEdit"
+                v-focus
+                class="inline-input"
+              />
+            </span>
+            <!-- Viewing Mode -->
+            <span 
+              v-else 
+              @dblclick.stop="startInlineEdit(`${props.row.site}_${props.row.target_year}`, 'expected_value', props.row.expected_value)" 
+              class="editable-cell"
+              title="Double-click to edit value"
+            >
+              {{ formatCurrency(props.row.expected_value) }}
+            </span>
+          </span>
+          <span v-else>
+            {{ props.formattedRow[props.column.field] }}
+          </span>
+        </template>
+
+        <template #emptystate>
+          <div class="no-data-message">No site targets found in the database.</div>
+        </template>
+      </vue-good-table>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- MODALS & DIALOGS                           -->
+    <!-- ========================================== -->
+
+    <!-- Add User Modal -->
+    <div v-if="showAddUserModal" class="modal-overlay">
+      <div class="modal">
+        <h3>Add New User</h3>
+        <form @submit.prevent="submitAddUser">
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label for="new_username">Username (LDAP ID)</label>
+            <input
+              id="new_username"
+              v-model="addUserForm.username"
+              :disabled="isProcessing"
+              placeholder="e.g. youngneo"
+              v-focus
+              required
+            />
+          </div>
+          
+          <div class="form-group" style="margin-bottom: 24px;">
+            <label for="new_role">Access Right</label>
+            <select id="new_role" v-model="addUserForm.access_right" :disabled="isProcessing" required>
+              <option v-for="role in availableRoles" :key="role" :value="role">{{ role.toUpperCase() }}</option>
+            </select>
+          </div>
+
+          <div class="modal-actions">
+            <button type="submit" class="actions formButton" :disabled="isProcessing">
+              {{ isProcessing ? 'Adding...' : 'Add User' }}
+            </button>
+            <button type="button" class="actions cancel" @click="showAddUserModal = false" :disabled="isProcessing">
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Add Config Modal -->
+    <div v-if="showAddConfigModal" class="modal-overlay">
+      <div class="modal">
+        <h3>Add New Configuration</h3>
+        <form @submit.prevent="submitAddConfig">
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" v-model="isAddingNewCategory" :disabled="isProcessing" style="width: auto; margin: 0;" />
+              <strong>Create a new category</strong>
+            </label>
+          </div>
+
+          <div v-if="isAddingNewCategory" class="form-group" style="margin-bottom: 16px;">
+            <label for="new_category_name">New Category Name</label>
+            <input
+              id="new_category_name"
+              v-model="addConfigForm.newCategory"
+              :disabled="isProcessing"
+              placeholder="e.g. DEPARTMENT or REGION"
+              required
+            />
+          </div>
+          <div v-else class="form-group" style="margin-bottom: 16px;">
+            <label>Target Category</label>
+            <input 
+              :value="availableCategories.length === 0 ? '-- No category selected --' : formatCategoryName(selectedCategory)" 
+              disabled 
+              style="background-color: #e9ecef; cursor: not-allowed; color: #495057; font-weight: bold;" 
+            />
+          </div>
+
+          <div class="form-group" style="margin-bottom: 24px;">
+            <label for="new_config_value">New Value</label>
+            <input
+              id="new_config_value"
+              v-model="addConfigForm.value"
+              :disabled="isProcessing"
+              placeholder="Enter new master data value..."
+              v-focus
+              required
+            />
+          </div>
+
+          <div class="modal-actions">
+            <button type="submit" class="actions formButton" :disabled="isProcessing">
+              {{ isProcessing ? 'Adding...' : 'Add Option' }}
+            </button>
+            <button type="button" class="actions cancel" @click="showAddConfigModal = false" :disabled="isProcessing">
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- NEW: Add Site Target Modal -->
+    <div v-if="showAddTargetModal" class="modal-overlay">
+      <div class="modal">
+        <h3>Add New Site Target</h3>
+        <form @submit.prevent="submitAddTarget">
+          
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label for="target_site">Site</label>
+            <!-- Dropdown if SITE config exists, otherwise text input -->
+            <select v-if="configMap.SITE && configMap.SITE.length > 0" id="target_site" v-model="addTargetForm.site" :disabled="isProcessing" required>
+              <option value="" disabled>Select a site...</option>
+              <option v-for="site in configMap.SITE" :key="site" :value="site">{{ site }}</option>
+            </select>
+            <input v-else id="target_site" v-model="addTargetForm.site" :disabled="isProcessing" placeholder="e.g. AMK" required />
+          </div>
+
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label for="target_year">Target Year</label>
+            <input
+              id="target_year"
+              type="number"
+              v-model="addTargetForm.target_year"
+              :disabled="isProcessing"
+              required
+            />
+          </div>
+
+          <div class="form-group" style="margin-bottom: 24px;">
+            <label for="expected_value">Expected Value ($)</label>
+            <input
+              id="expected_value"
+              type="number"
+              step="any"
+              v-model="addTargetForm.expected_value"
+              :disabled="isProcessing"
+              placeholder="e.g. 500000"
+              required
+            />
+          </div>
+
+          <div class="modal-actions">
+            <button type="submit" class="actions formButton" :disabled="isProcessing">
+              {{ isProcessing ? 'Saving...' : 'Save Target' }}
+            </button>
+            <button type="button" class="actions cancel" @click="showAddTargetModal = false" :disabled="isProcessing">
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Success Dialog -->
+    <div v-if="showSuccessDialog" class="modal-overlay">
+      <div class="confirmationmessage">
+        <h3>Successful!</h3>
+        <p>{{ successMessage }}</p>
+        <div class="modal-actions">
+          <button class="actions formButton" @click="showSuccessDialog = false" :disabled="isProcessing">OK</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</template>
+
+<script>
+import { VueGoodTable } from 'vue-good-table-next';
+import 'vue-good-table-next/dist/vue-good-table-next.css';
+
+export default {
+  name: 'AdminDashboard',
+  components: { VueGoodTable },
+  directives: {
+    focus: {
+      mounted(el) {
+        el.focus();
+      }
+    }
+  },
+  data() {
+    return {
+      activeTab: 'users',
+      isProcessing: false,
+      isPageLoading: false,
+      processingMessage: '',
+      
+      // Dialogs
+      showSuccessDialog: false,
+      successMessage: '',
+
+      // General Editing State
+      editingCell: { rowId: null, field: null },
+      editValue: null,
+
+      // User Management State
+      users: [],
+      availableRoles: ['pending', 'viewer', 'user', 'admin'],
+      showAddUserModal: false,
+      addUserForm: {
+        username: '',
+        access_right: 'viewer'
+      },
+      userColumns: [
+        { label: 'Username', field: 'username' },
+        { label: 'Access Right', field: 'access_right' },
+        { label: 'Last Granted By', field: 'granted_by' },
+        { label: 'Last Updated', field: 'updated_at' }
+      ],
+
+      // Configuration State
+      configMap: {}, 
+      availableCategories: [], 
+      selectedCategory: '',
+      showAddConfigModal: false,
+      isAddingNewCategory: false,
+      addConfigForm: {
+        newCategory: '',
+        value: ''
+      },
+      configColumns: [
+        { label: 'Active Options', field: 'value' }
+      ],
+
+      // Site Targets State
+      siteTargets: [],
+      showAddTargetModal: false,
+      addTargetForm: {
+        site: '',
+        target_year: new Date().getFullYear(),
+        expected_value: null
+      },
+      targetColumns: [
+        { label: 'Site', field: 'site', width: '200px' },
+        { label: 'Target Year', field: 'target_year', type: 'number', width: '150px' },
+        { label: 'Expected Value', field: 'expected_value', type: 'number', width: '200px' }
+      ]
+    };
+  },
+  computed: {
+    isAdmin() {
+      return localStorage.getItem('access_right') === 'admin';
+    },
+    filteredConfigOptions() {
+      if (!this.selectedCategory) return [];
+      const options = this.configMap[this.selectedCategory] || [];
+      return options.map(opt => ({ value: opt }));
+    }
+  },
+  async mounted() {
+    const token = localStorage.getItem('token');
+    if (!token || !this.isAdmin) {
+      alert("Access Denied: Administrator privileges required.");
+      this.$router.push('/landing');
+      return;
+    }
+
+    try {
+      const response = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/check-auth`);
+      if (!response.ok) throw new Error('Session expired');
+      
+      const authData = await response.json();
+      if (authData.user.access_right !== 'admin') {
+        throw new Error('Not an admin');
+      }
+    } catch {
+      localStorage.clear();
+      this.$router.push('/login');
+      return;
+    }
+
+    await Promise.all([
+      this.fetchUsers(),
+      this.fetchConfigs(),
+      this.fetchSiteTargets() 
+    ]);
+  },
+  methods: {
+    // -------------------------------------------------
+    // API UTILITY
+    // -------------------------------------------------
+    async apiFetch(url, options = {}) {
+      const token = localStorage.getItem('token');
+      if (!options.headers) options.headers = {};
+      options.headers['Authorization'] = `Bearer ${token}`;
+
+      const response = await fetch(url, options);
+
+      if (response.status === 401 || response.status === 403) {
+        alert('Session expired or unauthorized. Returning to login.');
+        localStorage.clear();
+        this.$router.push('/login');
+        throw new Error('Unauthorized');
+      }
+      return response;
+    },
+
+    // -------------------------------------------------
+    // NAVIGATION
+    // -------------------------------------------------
+    goHome() {
+      if (this.isProcessing || this.isPageLoading) return;
+      this.$router.push('/landing');
+    },
+    goBack() {
+      if (this.isProcessing || this.isPageLoading) return;
+      this.$router.push('/landing');
+    },
+    logout() {
+      if (this.isProcessing || this.isPageLoading) return;
+      localStorage.clear();
+      this.$router.push('/login');
+    },
+
+    // -------------------------------------------------
+    // GENERAL INLINE EDITING LOGIC
+    // -------------------------------------------------
+    startInlineEdit(rowId, field, currentValue) {
+      if (this.isProcessing || this.isPageLoading) return;
+      this.editingCell = { rowId, field };
+      this.editValue = currentValue;
+    },
+    cancelInlineEdit() {
+      this.editingCell = { rowId: null, field: null };
+      this.editValue = null;
+    },
+    formatDate(val) {
+      if (!val) return '-';
+      const date = new Date(val);
+      return isNaN(date.getTime()) ? val : date.toLocaleString();
+    },
+    formatCurrency(value) {
+      if (value === null || value === undefined || value === '') return '';
+      return `$${Number(value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+    },
+
+    // -------------------------------------------------
+    // USER MANAGEMENT LOGIC
+    // -------------------------------------------------
+    async fetchUsers() {
+      this.isPageLoading = true;
+      try {
+        const res = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/admin/users`);
+        if (!res.ok) throw new Error('Failed to fetch users');
+        this.users = await res.json();
+      } catch (err) {
+        console.error(err);
+      } finally {
+        this.isPageLoading = false;
+      }
+    },
+
+    openAddUserModal() {
+      this.addUserForm.username = '';
+      this.addUserForm.access_right = 'viewer';
+      this.showAddUserModal = true;
+    },
+
+    async submitAddUser() {
+      const newUsername = this.addUserForm.username.trim();
+      if (!newUsername) return alert('Username cannot be empty.');
+
+      this.isProcessing = true;
+      this.processingMessage = `Adding ${newUsername}...`;
+      
+      try {
+        const res = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/admin/users/${encodeURIComponent(newUsername)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ access_right: this.addUserForm.access_right })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.message || 'Failed to add user');
+        }
+
+        this.successMessage = `Successfully added ${newUsername} with ${this.addUserForm.access_right.toUpperCase()} access.`;
+        this.showAddUserModal = false;
+        this.showSuccessDialog = true;
+        await this.fetchUsers();
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        this.isProcessing = false;
+        this.processingMessage = '';
+      }
+    },
+
+    async saveUserRole(row) {
+      const field = this.editingCell.field;
+      if (!field || field !== 'access_right') return;
+
+      const newRole = this.editValue;
+      if (newRole === row.access_right) {
+        this.cancelInlineEdit();
+        return;
+      }
+
+      this.isProcessing = true;
+      this.processingMessage = `Updating role for ${row.username}...`;
+      
+      try {
+        const res = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/admin/users/${encodeURIComponent(row.username)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ access_right: newRole })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.message || 'Failed to update user role');
+        }
+
+        this.successMessage = `Successfully updated ${row.username} to ${newRole.toUpperCase()}.`;
+        this.showSuccessDialog = true;
+        await this.fetchUsers();
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        this.cancelInlineEdit();
+        this.isProcessing = false;
+        this.processingMessage = '';
+      }
+    },
+
+    // -------------------------------------------------
+    // SYSTEM CONFIGURATION LOGIC
+    // -------------------------------------------------
+    async fetchConfigs() {
+      try {
+        const res = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/config/options`);
+        if (!res.ok) throw new Error('Failed to fetch configuration options');
+        this.configMap = await res.json();
+        
+        this.availableCategories = Object.keys(this.configMap).sort();
+        
+        if (this.availableCategories.length > 0) {
+          if (!this.selectedCategory || !this.availableCategories.includes(this.selectedCategory)) {
+            this.selectedCategory = this.availableCategories[0];
+          }
+        } else {
+          this.selectedCategory = '';
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    },
+
+    formatCategoryName(cat) {
+      if (!cat) return '';
+      return cat.replace(/_/g, ' ');
+    },
+
+    openAddConfigModal() {
+      this.addConfigForm.value = '';
+      this.addConfigForm.newCategory = '';
+      this.isAddingNewCategory = false; 
+      this.showAddConfigModal = true;
+    },
+
+    async submitAddConfig() {
+      if (!this.addConfigForm.value.trim()) {
+        return alert("Value cannot be blank.");
+      }
+
+      let categoryToUse = this.selectedCategory;
+
+      if (this.isAddingNewCategory) {
+        if (!this.addConfigForm.newCategory.trim()) {
+          return alert("New category name cannot be blank.");
+        }
+        categoryToUse = this.addConfigForm.newCategory.trim().toUpperCase().replace(/\s+/g, '_');
+      }
+
+      if (!categoryToUse) {
+        return alert("Please select or create a category before adding an option.");
+      }
+
+      this.isProcessing = true;
+      this.processingMessage = 'Adding new option...';
+
+      try {
+        const payload = {
+          category: categoryToUse,
+          value: this.addConfigForm.value.trim()
+        };
+
+        const res = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/config/options`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.message || 'Failed to add option');
+        }
+
+        this.successMessage = `'${payload.value}' has been successfully added to ${this.formatCategoryName(categoryToUse)}.`;
+        this.showAddConfigModal = false;
+        this.showSuccessDialog = true;
+        
+        this.selectedCategory = categoryToUse;
+        await this.fetchConfigs();
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        this.isProcessing = false;
+        this.processingMessage = '';
+      }
+    },
+
+    // -------------------------------------------------
+    // SITE TARGETS LOGIC
+    // -------------------------------------------------
+    async fetchSiteTargets() {
+      try {
+        const res = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/manager-site-targets`);
+        if (!res.ok) throw new Error('Failed to fetch site targets');
+        this.siteTargets = await res.json();
+      } catch (err) {
+        console.error("Site targets fetch error:", err);
+      }
+    },
+
+    openAddTargetModal() {
+      this.addTargetForm.site = '';
+      this.addTargetForm.target_year = new Date().getFullYear();
+      this.addTargetForm.expected_value = null;
+      this.showAddTargetModal = true;
+    },
+
+    async submitAddTarget() {
+      if (!this.addTargetForm.site || !this.addTargetForm.target_year || this.addTargetForm.expected_value === null) {
+        return alert("All fields are required.");
+      }
+
+      this.isProcessing = true;
+      this.processingMessage = 'Adding new site target...';
+
+      try {
+        const res = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/manager-site-targets`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.addTargetForm)
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.message || 'Failed to add target');
+        }
+
+        this.successMessage = `Target for ${this.addTargetForm.site} (${this.addTargetForm.target_year}) successfully added.`;
+        this.showAddTargetModal = false;
+        this.showSuccessDialog = true;
+        
+        await this.fetchSiteTargets();
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        this.isProcessing = false;
+        this.processingMessage = '';
+      }
+    },
+
+    async saveSiteTarget(row) {
+      const field = this.editingCell.field;
+      if (field !== 'expected_value') return;
+
+      const newValue = Number(this.editValue);
+      if (newValue === Number(row.expected_value)) {
+        this.cancelInlineEdit();
+        return;
+      }
+
+      this.isProcessing = true;
+      this.processingMessage = `Updating target for ${row.site}...`;
+      
+      try {
+        const res = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/manager-site-targets`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            site: row.site,
+            target_year: row.target_year,
+            expected_value: newValue
+          })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.message || 'Failed to update target');
+        }
+
+        this.successMessage = `Successfully updated target for ${row.site} (${row.target_year}).`;
+        this.showSuccessDialog = true;
+        await this.fetchSiteTargets();
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        this.cancelInlineEdit();
+        this.isProcessing = false;
+        this.processingMessage = '';
+      }
+    }
+  }
+};
+</script>
+
+<style scoped>
+/* Base Layout */
+.table-gui-page {
+  padding-bottom: 50px;
+  font-family: Arial, sans-serif;
+  background-color: #f4f6f9;
+  min-height: 100vh;
+}
+
+/* Header & Banner */
+.top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #07254a;
+  padding: 10px 20px;
+  color: white;
+}
+.left {
+  display: flex;
+  align-items: center;
+}
+.logo {
+  height: 40px;
+  margin-right: 15px;
+}
+.title {
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.home-btn,
+.logout-btn,
+.back-btn {
+  background: none;
+  color: #fff;
+  border: 2px solid #fff;
+  font-size: 1.1rem;
+  cursor: pointer;
+  font-weight: 500;
+  border-radius: 8px;
+  padding: 8px 24px;
+  transition: background 0.2s, color 0.2s, border 0.2s;
+}
+.home-btn:hover,
+.logout-btn:hover,
+.back-btn:hover {
+  background: #ffd600;
+  color: #07254a;
+  border-color: #ffd600;
+}
+
+.banner {
+  background-color: #1f5fa8;
+  color: white;
+  padding: 15px 20px;
+  font-size: 1.5rem;
+  font-weight: bold;
+  text-align: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Tabs Architecture */
+.tabs-container {
+  display: flex;
+  background: white;
+  border-bottom: 2px solid #e0e6ed;
+  padding: 0 20px;
+}
+.tab-btn {
+  background: none;
+  border: none;
+  padding: 16px 24px;
+  font-size: 1.05rem;
+  font-weight: bold;
+  color: #6c757d;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  transition: color 0.2s, border-color 0.2s;
+}
+.tab-btn:hover {
+  color: #07254a;
+}
+.tab-btn.active {
+  color: #07254a;
+  border-bottom-color: #ffd600;
+}
+
+/* Tables Section */
+.table-section {
+  padding: 0 20px;
+}
+
+.no-data-message {
+  text-align: center;
+  color: #666;
+  font-size: 1.1rem;
+  padding: 30px;
+  background-color: #fff;
+  border-radius: 8px;
+  border: 1px solid #e0e6ed;
+}
+
+/* Inline Edit Tooltips and CSS */
+.editable-cell {
+  cursor: pointer;
+  border: 1px dashed transparent;
+  border-radius: 4px;
+  transition: all 0.2s ease-in-out;
+  display: inline-block;
+  min-width: 100px;
+  min-height: 25px;
+  padding: 4px;
+  box-sizing: border-box;
+}
+
+.editable-cell:hover {
+  border-color: #1f5fa8;
+  background-color: #f0f4f8;
+}
+
+.inline-input {
+  display: block;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 2px solid #1f5fa8;
+  border-radius: 4px;
+  outline: none;
+  font-family: inherit;
+  font-size: inherit;
+  background-color: #fff;
+  box-shadow: 0 0 5px rgba(31, 95, 168, 0.2);
+}
+
+/* Role Badges */
+.status-badge {
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: bold;
+  display: inline-block;
+}
+.role-pending { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+.role-viewer { background-color: #e2e3e5; color: #383d41; border: 1px solid #d6d8db; }
+.role-user { background-color: #cce5ff; color: #004085; border: 1px solid #b8daff; }
+.role-admin { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+
+/* Config Controls */
+.config-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  background: white;
+  padding: 16px 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e0e6ed;
+  margin-bottom: 16px;
+}
+.category-select {
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1rem;
+  background-color: #fff;
+  color: #333;
+  width: 100%;
+  font-weight: bold;
+}
+.category-select:disabled {
+  background-color: #e9ecef;
+  cursor: not-allowed;
+}
+
+.primary-btn {
+  background-color: #ffd600;
+  padding: 10px 20px;
+  border-radius: 4px;
+  border: none;
+  font-weight: bold;
+  cursor: pointer;
+  color: #07254a;
+  transition: opacity 0.2s;
+}
+.primary-btn:hover {
+  opacity: 0.9;
+}
+
+/* Forms & Modals */
+.form-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 600;
+  color: #1f3b64;
+  font-size: 0.9rem;
+}
+.form-group input,
+.form-group select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background-color: white;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+.modal {
+  background: #fff;
+  padding: 24px;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.modal h3 {
+  margin-top: 0;
+  color: #07254a;
+  border-bottom: 2px solid #eee;
+  padding-bottom: 10px;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+  border-top: 2px solid #eee;
+  padding-top: 16px;
+}
+.formButton {
+  background-color: #28a745;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  font-weight: bold;
+  cursor: pointer;
+}
+.cancel {
+  background-color: #6c757d;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  font-weight: bold;
+  cursor: pointer;
+}
+.confirmationmessage {
+  background: #fff;
+  padding: 24px 32px;
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.15);
+  min-width: 380px;
+  text-align: center;
+}
+
+/* Loaders */
+.loading-box {
+  text-align: center;
+  background: #fff;
+  padding: 24px 32px;
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.15);
+  min-width: 380px;
+}
+.spinner {
+  width: 42px;
+  height: 42px;
+  border: 4px solid #ddd;
+  border-top: 4px solid #1f5fa8;
+  border-radius: 50%;
+  margin: 0 auto 12px;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-subtext { margin-top: 8px; font-size: 0.92rem; color: #666; }
+.loading-bar-wrapper { width: 320px; height: 12px; background: #e7edf5; border-radius: 999px; overflow: hidden; margin: 16px auto 0; position: relative; }
+.loading-bar-indeterminate { width: 40%; height: 100%; position: absolute; left: -40%; top: 0; border-radius: 999px; background: linear-gradient(90deg, #1f5fa8, #4da3ff, #1f5fa8); animation: loading-bar-slide 1.15s ease-in-out infinite; }
+@keyframes loading-bar-slide { 0% { left: -40%; } 100% { left: 100%; } }
+
+/* Vue Good Table Overrides */
+:deep(.vgt-table th) { white-space: nowrap; font-size: 0.9rem; background-color: #f8f9fb; }
+:deep(.vgt-table td) { font-size: 0.95rem; }
+</style>
