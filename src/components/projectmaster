@@ -35,8 +35,6 @@
       </div>
     </header>
 
-    <div class="banner">{{ pageBanner }}</div>
-
     <div class="upload-section" v-if="isAdmin">
       <label
         class="uploadExport-label"
@@ -574,7 +572,6 @@ export default {
 
   data() {
     return {
-      pageBanner: 'Project Master',
       columns: [],
       rows: [],
       filteredRows: [],
