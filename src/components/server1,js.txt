@@ -29,19 +29,10 @@ const ACCESS_TABLE = process.env.ACCESS_TABLE || 't_project_access';
 const HISTORY_TABLE = 't_project_values_history'; 
 const MASTER_HISTORY_TABLE = 't_project_master_history'; 
 
-// Manager Yearly Tracking Tables (bem_projs database)
-const MANAGER_PROJECTS_TABLE = 't_manager_project_master';
-const MANAGER_YEARLY_TABLE = 't_manager_yearly_savings';
-const MANAGER_METRICS_TABLE = 't_manager_metrics';
-const MANAGER_COMMENTS_TABLE = 't_manager_comments';
-const MANAGER_HISTORY_TABLE = 't_manager_history';
-const MANAGER_SITE_TARGETS_TABLE = 't_manager_site_targets'; 
-const MANAGER_PHASES_TABLE = 't_manager_project_phases'; // NEW: Ledger Table
-
 const app = express();
 
 app.use(cors({
-  origin: ['http://localhost:8080', 'http://localhost:8081'],
+  origin: ['http://localhost:8080', 'http://localhost:8081', 'http://muasxv4005.mua.st.com:8888'],
   credentials: true
 }));
 
@@ -98,17 +89,7 @@ const db = mysql.createPool({
   queueLimit: 0
 });
 
-// NEW DB Connection (For Manager Yearly Dashboard -> bem_projs)
-const bemDb = mysql.createPool({
-  host: process.env.DB_HOST, 
-  user: process.env.BEM_DB_USER,
-  password: process.env.BEM_DB_PASSWORD,
-  database: process.env.BEM_DB_NAME,
-  port: process.env.DB_PORT,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
+
 
 // =====================================
 // Helpers
@@ -143,34 +124,7 @@ function queryPromise(sql, params = [], req = null) {
   });
 }
 
-function bemQueryPromise(sql, params = [], req = null) {
-  const trace = traceStart('bemQueryPromise', req, {
-    sqlPreview: typeof sql === 'string'
-      ? sql.replace(/\s+/g, ' ').trim().slice(0, 200)
-      : null,
-    paramCount: Array.isArray(params) ? params.length : 0
-  });
 
-  return new Promise((resolve, reject) => {
-    bemDb.query(sql, params, (err, results) => {
-      if (err) {
-        traceError(trace, err, {
-          sqlPreview: typeof sql === 'string'
-            ? sql.replace(/\s+/g, ' ').trim().slice(0, 200)
-            : null
-        });
-        return reject(err);
-      }
-
-      traceEnd(trace, {
-        rowCount: Array.isArray(results) ? results.length : undefined,
-        affectedRows: results?.affectedRows
-      });
-
-      resolve(results);
-    });
-  });
-}
 
 function safeUnlink(filePath) {
   if (!filePath) return;
@@ -1109,7 +1063,7 @@ app.get('/api/project-values', authenticateToken, async (req, res) => {
           m.project_description,
           m.project_status,
           m.use_case_investment,
-          DATE_FORMAT(v.week_end, '%Y-%m-%d') AS week_end,
+          DATE_FORMAT(v.month_end, '%Y-%m-%d') AS month_end,
           v.capacity_improvement,
           v.people_productivity,
           v.quality_improvement,
@@ -1117,7 +1071,7 @@ app.get('/api/project-values', authenticateToken, async (req, res) => {
         FROM ${PROJECT_VALUES_TABLE} v
         LEFT JOIN ${PROJECT_MASTER_TABLE} m
           ON v.project_code = m.project_code
-        ORDER BY v.week_end DESC, m.project_name ASC
+        ORDER BY v.month_end DESC, m.project_name ASC
       `,
       [],
       req
@@ -1137,7 +1091,7 @@ app.get('/api/project-values/history/all', authenticateToken, requireAdmin, asyn
     const rows = await queryPromise(
       `SELECT 
          history_id, metric_id, project_code, 
-         DATE_FORMAT(week_end, '%Y-%m-%d') AS week_end,
+         DATE_FORMAT(month_end, '%Y-%m-%d') AS month_end,
          capacity_improvement, yield_savings, people_productivity, quality_improvement,
          changed_by, DATE_FORMAT(changed_at, '%Y-%m-%d %H:%i:%s') AS changed_at, 
          action_type
@@ -1162,7 +1116,7 @@ app.get('/api/project-values/:metricId/history', authenticateToken, async (req, 
          history_id, 
          metric_id, 
          project_code, 
-         DATE_FORMAT(week_end, '%Y-%m-%d') AS week_end,
+         DATE_FORMAT(month_end, '%Y-%m-%d') AS month_end,
          capacity_improvement, 
          yield_savings, 
          people_productivity, 
@@ -1191,7 +1145,7 @@ app.post('/api/project-values', authenticateToken, async (req, res) => {
     const payload = {
       project_code: normalizeText(req.body.project_code),
       project_name: normalizeText(req.body.project_name),
-      week_end: parseStandardDate(req.body.week_end), 
+      month_end: parseStandardDate(req.body.month_end), 
       capacity_improvement: normalizeNumber(req.body.capacity_improvement),
       people_productivity: normalizeNumber(req.body.people_productivity),
       quality_improvement: normalizeNumber(req.body.quality_improvement),
@@ -1213,14 +1167,14 @@ app.post('/api/project-values', authenticateToken, async (req, res) => {
     }
 
     const existing = await queryPromise(
-      `SELECT metric_id FROM ${PROJECT_VALUES_TABLE} WHERE project_code = ? AND CAST(week_end AS DATE) = CAST(? AS DATE)`,
-      [project.project_code, payload.week_end], req
+      `SELECT metric_id FROM ${PROJECT_VALUES_TABLE} WHERE project_code = ? AND CAST(month_end AS DATE) = CAST(? AS DATE)`,
+      [project.project_code, payload.month_end], req
     );
 
     if (existing.length > 0) {
       traceEnd(trace, { outcome: 'duplicate_prevented' });
       return res.status(409).json({
-        message: `Data for ${project.project_name || project.project_code} on week ${payload.week_end} already exists. Please select it from the table and click 'Update' instead.`
+        message: `Data for ${project.project_name || project.project_code} for month ending ${payload.month_end} already exists. Please select it from the table and click 'Update' instead.`
       });
     }
 
@@ -1229,7 +1183,7 @@ app.post('/api/project-values', authenticateToken, async (req, res) => {
         INSERT INTO ${PROJECT_VALUES_TABLE}
         (
           project_code,
-          week_end,
+          month_end,
           capacity_improvement,
           people_productivity,
           quality_improvement,
@@ -1239,7 +1193,7 @@ app.post('/api/project-values', authenticateToken, async (req, res) => {
       `,
       [
         project.project_code,
-        payload.week_end,
+        payload.month_end,
         payload.capacity_improvement,
         payload.people_productivity,
         payload.quality_improvement,
@@ -1258,7 +1212,7 @@ app.post('/api/project-values', authenticateToken, async (req, res) => {
           m.project_description,
           m.project_status,
           m.use_case_investment,
-          DATE_FORMAT(v.week_end, '%Y-%m-%d') AS week_end,
+          DATE_FORMAT(v.month_end, '%Y-%m-%d') AS month_end,
           v.capacity_improvement,
           v.people_productivity,
           v.quality_improvement,
@@ -1292,7 +1246,7 @@ app.put('/api/project-values/:metricId', authenticateToken, async (req, res) => 
     const payload = {
       project_code: normalizeText(req.body.project_code),
       project_name: normalizeText(req.body.project_name),
-      week_end: parseStandardDate(req.body.week_end), 
+      month_end: parseStandardDate(req.body.month_end), 
       capacity_improvement: normalizeNumber(req.body.capacity_improvement),
       people_productivity: normalizeNumber(req.body.people_productivity),
       quality_improvement: normalizeNumber(req.body.quality_improvement),
@@ -1314,25 +1268,25 @@ app.put('/api/project-values/:metricId', authenticateToken, async (req, res) => 
     }
 
     const existing = await queryPromise(
-      `SELECT metric_id FROM ${PROJECT_VALUES_TABLE} WHERE project_code = ? AND CAST(week_end AS DATE) = CAST(? AS DATE) AND metric_id != ?`,
-      [project.project_code, payload.week_end, metricId], req
+      `SELECT metric_id FROM ${PROJECT_VALUES_TABLE} WHERE project_code = ? AND CAST(month_end AS DATE) = CAST(? AS DATE) AND metric_id != ?`,
+      [project.project_code, payload.month_end, metricId], req
     );
 
     if (existing.length > 0) {
       traceEnd(trace, { outcome: 'update_conflict_prevented' });
       return res.status(409).json({
-        message: `Cannot update: A different record for ${project.project_name || project.project_code} already exists on ${payload.week_end}.`
+        message: `Cannot update: A different record for ${project.project_name || project.project_code} already exists for month ending ${payload.month_end}.`
       });
     }
 
     await queryPromise(
       `INSERT INTO ${HISTORY_TABLE} (
-         metric_id, project_code, week_end, capacity_improvement,
+         metric_id, project_code, month_end, capacity_improvement,
          yield_savings, people_productivity, quality_improvement,
          changed_by, action_type
        )
        SELECT
-         metric_id, project_code, week_end, capacity_improvement,
+         metric_id, project_code, month_end, capacity_improvement,
          yield_savings, people_productivity, quality_improvement,
          ?, 'UPDATE'
        FROM ${PROJECT_VALUES_TABLE}
@@ -1345,7 +1299,7 @@ app.put('/api/project-values/:metricId', authenticateToken, async (req, res) => 
         UPDATE ${PROJECT_VALUES_TABLE}
         SET
           project_code = ?,
-          week_end = ?,
+          month_end = ?,
           capacity_improvement = ?,
           people_productivity = ?,
           quality_improvement = ?,
@@ -1354,7 +1308,7 @@ app.put('/api/project-values/:metricId', authenticateToken, async (req, res) => 
       `,
       [
         project.project_code,
-        payload.week_end,
+        payload.month_end,
         payload.capacity_improvement,
         payload.people_productivity,
         payload.quality_improvement,
@@ -1379,7 +1333,7 @@ app.put('/api/project-values/:metricId', authenticateToken, async (req, res) => 
           m.project_description,
           m.project_status,
           m.use_case_investment,
-          DATE_FORMAT(v.week_end, '%Y-%m-%d') AS week_end,
+          DATE_FORMAT(v.month_end, '%Y-%m-%d') AS month_end,
           v.capacity_improvement,
           v.people_productivity,
           v.quality_improvement,
@@ -1452,7 +1406,7 @@ app.post('/api/project-values/import', authenticateToken, upload.single('file'),
     const rows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
 
     const minimumColumns = [
-      'week_end',
+      'month_end',
       'capacity_improvement',
       'people_productivity',
       'quality_improvement',
@@ -1491,7 +1445,7 @@ app.post('/api/project-values/import', authenticateToken, upload.single('file'),
         const payload = {
           project_code: normalizeText(row['project_code']),
           project_name: normalizeText(row['project_name']),
-          week_end: parseStandardDate(row['week_end']), 
+          month_end: parseStandardDate(row['month_end']), 
           capacity_improvement: normalizeNumber(row['capacity_improvement']),
           people_productivity: normalizeNumber(row['people_productivity']),
           quality_improvement: normalizeNumber(row['quality_improvement']),
@@ -1506,7 +1460,7 @@ app.post('/api/project-values/import', authenticateToken, upload.single('file'),
         
         payload.resolved_project_code = project.project_code;
 
-        const uniqueKey = `${payload.resolved_project_code}_${payload.week_end}`;
+        const uniqueKey = `${payload.resolved_project_code}_${payload.month_end}`;
         parsedMap.set(uniqueKey, payload);
 
       } catch (rowErr) {
@@ -1519,15 +1473,15 @@ app.post('/api/project-values/import', authenticateToken, upload.single('file'),
 
     for (const payload of uniquePayloads) {
       const existing = await queryPromise(
-        `SELECT metric_id FROM ${PROJECT_VALUES_TABLE} WHERE project_code = ? AND CAST(week_end AS DATE) = CAST(? AS DATE)`,
-        [payload.resolved_project_code, payload.week_end], req
+        `SELECT metric_id FROM ${PROJECT_VALUES_TABLE} WHERE project_code = ? AND CAST(month_end AS DATE) = CAST(? AS DATE)`,
+        [payload.resolved_project_code, payload.month_end], req
       );
 
       if (existing.length > 0) {
         if (!overwrite) {
           return res.status(409).json({ 
             requires_confirmation: true, 
-            message: 'Duplicate weeks detected. Waiting for user confirmation.' 
+            message: 'Duplicate months detected. Waiting for user confirmation.' 
           });
         }
         payload.metric_id = existing[0].metric_id;
@@ -1542,12 +1496,12 @@ app.post('/api/project-values/import', authenticateToken, upload.single('file'),
         
         await queryPromise(
           `INSERT INTO ${HISTORY_TABLE} (
-             metric_id, project_code, week_end, capacity_improvement,
+             metric_id, project_code, month_end, capacity_improvement,
              yield_savings, people_productivity, quality_improvement,
              changed_by, action_type
            )
            SELECT
-             metric_id, project_code, week_end, capacity_improvement,
+             metric_id, project_code, month_end, capacity_improvement,
              yield_savings, people_productivity, quality_improvement,
              ?, 'UPDATE'
            FROM ${PROJECT_VALUES_TABLE}
@@ -1562,8 +1516,8 @@ app.post('/api/project-values/import', authenticateToken, upload.single('file'),
         updated += 1;
       } else {
         await queryPromise(
-          `INSERT INTO ${PROJECT_VALUES_TABLE} (project_code, week_end, capacity_improvement, people_productivity, quality_improvement, yield_savings) VALUES (?, ?, ?, ?, ?, ?)`,
-          [payload.resolved_project_code, payload.week_end, payload.capacity_improvement, payload.people_productivity, payload.quality_improvement, payload.yield_savings], req
+          `INSERT INTO ${PROJECT_VALUES_TABLE} (project_code, month_end, capacity_improvement, people_productivity, quality_improvement, yield_savings) VALUES (?, ?, ?, ?, ?, ?)`,
+          [payload.resolved_project_code, payload.month_end, payload.capacity_improvement, payload.people_productivity, payload.quality_improvement, payload.yield_savings], req
         );
         inserted += 1;
       }
@@ -1585,433 +1539,6 @@ app.post('/api/project-values/import', authenticateToken, upload.single('file'),
   }
 });
 
-// =====================================
-// MANAGER YEARLY TRACKING ROUTES
-// =====================================
-
-app.get('/api/manager-yearly', authenticateToken, async (req, res) => {
-  const trace = traceStart('GET /api/manager-yearly', req);
-
-  try {
-    const projects = await bemQueryPromise(`SELECT * FROM ${MANAGER_PROJECTS_TABLE} ORDER BY project_name ASC`, [], req);
-    const yearlyValues = await bemQueryPromise(`SELECT * FROM ${MANAGER_YEARLY_TABLE}`, [], req);
-    
-    // Fetch the latest metrics per project
-    const metrics = await bemQueryPromise(`
-      SELECT m.* FROM ${MANAGER_METRICS_TABLE} m
-      INNER JOIN (
-        SELECT project_id, MAX(reporting_year) as max_year 
-        FROM ${MANAGER_METRICS_TABLE} 
-        GROUP BY project_id
-      ) latest ON m.project_id = latest.project_id AND m.reporting_year = latest.max_year
-    `, [], req);
-
-    // Fetch the latest comment per project
-    const comments = await bemQueryPromise(`
-      SELECT c.* FROM ${MANAGER_COMMENTS_TABLE} c
-      INNER JOIN (
-        SELECT project_id, MAX(created_at) as max_date 
-        FROM ${MANAGER_COMMENTS_TABLE} 
-        GROUP BY project_id
-      ) latest ON c.project_id = latest.project_id AND c.created_at = latest.max_date
-    `, [], req);
-
-    // --- NEW: Fetch Actual Dates from the Phases Ledger ---
-    const phases = await bemQueryPromise(`
-      SELECT project_id, phase_name, DATE_FORMAT(MIN(start_date), '%Y-%m-%d') as actual_start 
-      FROM ${MANAGER_PHASES_TABLE} 
-      WHERE phase_name IN ('G1', 'G2', 'G3') 
-      GROUP BY project_id, phase_name
-    `, [], req);
-
-    const result = projects.map(proj => {
-      const projMetrics = metrics.find(m => m.project_id === proj.project_id) || {};
-      const projComment = comments.find(c => c.project_id === proj.project_id) || {};
-
-      // Match actual start dates from ledger
-      const g1 = phases.find(p => p.project_id === proj.project_id && p.phase_name === 'G1');
-      const g2 = phases.find(p => p.project_id === proj.project_id && p.phase_name === 'G2');
-      const g3 = phases.find(p => p.project_id === proj.project_id && p.phase_name === 'G3');
-
-      const payload = {
-        projectId: proj.project_id,
-        projectName: proj.project_name,
-        projectStatus: proj.project_status || null,
-        pillars: proj.pillar,
-        sites: proj.site,
-        currentPmoGate: proj.current_pmo_gate,
-        dtitInvolved: proj.dtit_involved,
-        aiAaAType: proj.ai_type,
-        foakNoak: proj.foak_noak,
-        
-        // Target Timeline Dates
-        targetG1Date: proj.target_g1_date || null,
-        targetG2Date: proj.target_g2_date || null,
-        targetG3Date: proj.target_g3_date || null,
-        targetClosedDate: proj.target_closed_date || null,
-
-        // --- NEW: Actual Timeline Dates (Sourced directly from historical ledger) ---
-        actualG1Date: g1 ? g1.actual_start : null,
-        actualG2Date: g2 ? g2.actual_start : null,
-        actualG3Date: g3 ? g3.actual_start : null,
-
-        // Mapped from t_manager_comments
-        comment: projComment.comment_text || null,
-
-        // Mapped from t_manager_metrics
-        capacityGainValue: projMetrics.capacity_gain_value || null,
-        capacityGainPercent: projMetrics.capacity_gain_pct || null,
-        dlValue: projMetrics.dl_value || null,
-        dlEquivalent: projMetrics.dl_equivalent || null,
-        idlValue: projMetrics.idl_value || null,
-        idlFte: projMetrics.idl_fte || null,
-        yieldValue: projMetrics.yield_value || null,
-        yieldPercentGain: projMetrics.yield_gain_pct || null,
-        qualityValue: projMetrics.quality_value || null,
-        qualityCases: projMetrics.quality_cases || null
-      };
-
-      // Mapped from t_manager_yearly_savings
-      const projYears = yearlyValues.filter(y => y.project_id === proj.project_id);
-      projYears.forEach(y => {
-        payload[`year${y.savings_year}`] = y.savings_value;
-      });
-
-      return payload;
-    });
-
-    traceEnd(trace, { outcome: 'success', rowCount: result.length });
-    return res.json(result);
-  } catch (err) {
-    traceError(trace, err);
-    return res.status(500).json({ message: err.message });
-  }
-});
-
-// --- NEW ROUTE: Pipeline Velocity (Monthly Throughput) ---
-app.get('/api/manager-yearly/pipeline-velocity', authenticateToken, async (req, res) => {
-  const trace = traceStart('GET /api/manager-yearly/pipeline-velocity', req);
-  try {
-    // Automatically groups ledger records by month/year and counts G1/G2/G3 entrances
-    const rows = await bemQueryPromise(`
-      SELECT 
-        DATE_FORMAT(start_date, '%Y-%m') AS month_key,
-        DATE_FORMAT(start_date, '%b %Y') AS month_label,
-        SUM(CASE WHEN phase_name = 'G1' THEN 1 ELSE 0 END) AS g1_count,
-        SUM(CASE WHEN phase_name = 'G2' THEN 1 ELSE 0 END) AS g2_count,
-        SUM(CASE WHEN phase_name = 'G3' THEN 1 ELSE 0 END) AS g3_count,
-        COUNT(*) AS total_transitions
-      FROM ${MANAGER_PHASES_TABLE}
-      WHERE phase_name IN ('G1', 'G2', 'G3')
-      GROUP BY month_key, month_label
-      ORDER BY month_key DESC
-      LIMIT 12
-    `, [], req);
-
-    // Clean up the formatting so Vue can directly inject it into the table
-    const formattedData = rows.map(r => ({
-      month: r.month_label,
-      g1: Number(r.g1_count),
-      g2: Number(r.g2_count),
-      g3: Number(r.g3_count),
-      total: Number(r.total_transitions)
-    }));
-
-    traceEnd(trace, { outcome: 'success', rowCount: formattedData.length });
-    return res.json(formattedData);
-  } catch (err) {
-    traceError(trace, err);
-    return res.status(500).json({ message: err.message });
-  }
-});
-
-// Manager Site Targets Route
-app.get('/api/manager-site-targets', authenticateToken, async (req, res) => {
-  const trace = traceStart('GET /api/manager-site-targets', req);
-  try {
-    const rows = await bemQueryPromise(`SELECT * FROM ${MANAGER_SITE_TARGETS_TABLE}`, [], req);
-    traceEnd(trace, { outcome: 'success', rowCount: rows.length });
-    return res.json(rows);
-  } catch (err) {
-    traceError(trace, err);
-    return res.status(500).json({ message: err.message });
-  }
-});
-
-// Global Audit Log Route
-app.get('/api/manager-yearly/history/all', authenticateToken, requireAdmin, async (req, res) => {
-  const trace = traceStart('GET /api/manager-yearly/history/all', req);
-  try {
-    const rows = await bemQueryPromise(
-      `SELECT 
-         history_id, project_id, project_name, project_status, 
-         capacity_gain_value, capacity_gain_pct, dl_value, dl_equivalent,
-         idl_value, idl_fte, yield_value, yield_gain_pct, quality_value, quality_cases, comment_text,
-         changed_by, DATE_FORMAT(changed_at, '%Y-%m-%d %H:%i:%s') AS changed_at, 
-         action_type
-       FROM ${MANAGER_HISTORY_TABLE}
-       ORDER BY changed_at DESC`,
-      [], req
-    );
-    traceEnd(trace, { outcome: 'success', rowCount: rows.length });
-    return res.json(rows);
-  } catch (err) {
-    traceError(trace, err);
-    return res.status(500).json({ message: err.message });
-  }
-});
-
-// Project-Level History Route
-app.get('/api/manager-yearly/:projectId/history', authenticateToken, async (req, res) => {
-  const trace = traceStart('GET /api/manager-yearly/:projectId/history', req);
-  try {
-    const projectId = req.params.projectId;
-    const rows = await bemQueryPromise(
-      `SELECT 
-         history_id, project_id, project_name, project_status, 
-         capacity_gain_value, capacity_gain_pct, dl_value, dl_equivalent,
-         idl_value, idl_fte, yield_value, yield_gain_pct, quality_value, quality_cases, comment_text,
-         changed_by, DATE_FORMAT(changed_at, '%Y-%m-%d %H:%i:%s') AS changed_at, 
-         action_type
-       FROM ${MANAGER_HISTORY_TABLE}
-       WHERE project_id = ?
-       ORDER BY changed_at DESC`,
-      [projectId], 
-      req
-    );
-    traceEnd(trace, { outcome: 'success', rowCount: rows.length });
-    return res.json(rows);
-  } catch (err) {
-    traceError(trace, err);
-    return res.status(500).json({ message: err.message });
-  }
-});
-
-app.post('/api/manager-yearly', authenticateToken, requireAdmin, async (req, res) => {
-  const trace = traceStart('POST /api/manager-yearly', req);
-
-  try {
-    const payload = {
-      project_id: normalizeText(req.body.projectId),
-      project_name: normalizeText(req.body.projectName),
-      project_status: normalizeText(req.body.projectStatus),
-      pillars: normalizeText(req.body.pillars),
-      sites: normalizeText(req.body.sites),
-      current_pmo_gate: normalizeText(req.body.currentPmoGate),
-      dtit_involved: normalizeText(req.body.dtitInvolved),
-      ai_aa_a_type: normalizeText(req.body.aiAaAType),
-      foak_noak: normalizeText(req.body.foakNoak),
-      // --- NEW: Added Target Timeline Dates ---
-      target_g1_date: parseStandardDate(req.body.targetG1Date),
-      target_g2_date: parseStandardDate(req.body.targetG2Date),
-      target_g3_date: parseStandardDate(req.body.targetG3Date),
-      target_closed_date: parseStandardDate(req.body.targetClosedDate)
-    };
-
-    if (!payload.project_id || !payload.project_name) {
-      traceEnd(trace, { outcome: 'validation_failed' });
-      return res.status(400).json({ message: 'Project ID and Project Name are required.' });
-    }
-
-    // Insert only the metadata. The chained PUT request from Vue handles the financial/KPI arrays.
-    await bemQueryPromise(
-      `
-        INSERT INTO ${MANAGER_PROJECTS_TABLE}
-        (
-          project_id, project_name, project_status, pillar, site, current_pmo_gate, dtit_involved, ai_type, foak_noak,
-          target_g1_date, target_g2_date, target_g3_date, target_closed_date
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      [
-        payload.project_id, payload.project_name, payload.project_status, payload.pillars, payload.sites,
-        payload.current_pmo_gate, payload.dtit_involved, payload.ai_aa_a_type, payload.foak_noak,
-        payload.target_g1_date, payload.target_g2_date, payload.target_g3_date, payload.target_closed_date
-      ],
-      req
-    );
-
-    // --- NEW: Open initial phase in ledger if a status was provided ---
-    if (payload.project_status) {
-      await bemQueryPromise(
-        `INSERT INTO ${MANAGER_PHASES_TABLE} (project_id, phase_name, start_date) VALUES (?, ?, CURDATE())`,
-        [payload.project_id, payload.project_status], req
-      );
-    }
-
-    traceEnd(trace, { outcome: 'success', project_id: payload.project_id });
-    return res.status(201).json({ message: 'Project created successfully.', project_id: payload.project_id });
-  } catch (err) {
-    traceError(trace, err);
-    if (err.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ message: 'Project ID already exists.' });
-    }
-    return res.status(500).json({ message: err.message });
-  }
-});
-
-app.put('/api/manager-yearly/:projectId', authenticateToken, requireAdmin, async (req, res) => {
-  const trace = traceStart('PUT /api/manager-yearly/:projectId', req, { projectId: req.params.projectId });
-
-  try {
-    const projectId = req.params.projectId;
-    const currentUser = getCurrentUser(req);
-    const currentYear = new Date().getFullYear();
-
-    // Parse the new incoming target dates
-    const targetG1Date = parseStandardDate(req.body.targetG1Date);
-    const targetG2Date = parseStandardDate(req.body.targetG2Date);
-    const targetG3Date = parseStandardDate(req.body.targetG3Date);
-    const targetClosedDate = parseStandardDate(req.body.targetClosedDate);
-
-    // --- 0. LOG HISTORY BEFORE UPDATE ---
-    const currentState = await bemQueryPromise(`
-      SELECT 
-        p.project_name, p.project_status,
-        m.capacity_gain_value, m.capacity_gain_pct, m.dl_value, m.dl_equivalent, 
-        m.idl_value, m.idl_fte, m.yield_value, m.yield_gain_pct, 
-        m.quality_value, m.quality_cases, 
-        c.comment_text
-      FROM ${MANAGER_PROJECTS_TABLE} p
-      LEFT JOIN ${MANAGER_METRICS_TABLE} m ON p.project_id = m.project_id AND m.reporting_year = ?
-      LEFT JOIN ${MANAGER_COMMENTS_TABLE} c ON p.project_id = c.project_id
-      WHERE p.project_id = ?
-      ORDER BY c.created_at DESC LIMIT 1
-    `, [currentYear, projectId], req);
-
-    if (currentState.length > 0) {
-      const curr = currentState[0];
-      await bemQueryPromise(`
-        INSERT INTO ${MANAGER_HISTORY_TABLE} (
-          project_id, project_name, project_status, capacity_gain_value, capacity_gain_pct, 
-          dl_value, dl_equivalent, idl_value, idl_fte, yield_value, yield_gain_pct, 
-          quality_value, quality_cases, comment_text, changed_by, action_type
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'UPDATE')
-      `, [
-        projectId, curr.project_name, curr.project_status, curr.capacity_gain_value, curr.capacity_gain_pct,
-        curr.dl_value, curr.dl_equivalent, curr.idl_value, curr.idl_fte, curr.yield_value, curr.yield_gain_pct,
-        curr.quality_value, curr.quality_cases, curr.comment_text, currentUser
-      ], req);
-    }
-
-    // --- 1. Update Project Master (Metadata) ---
-    if (req.body.projectName) {
-      const newStatus = normalizeText(req.body.projectStatus);
-      
-      await bemQueryPromise(
-        `UPDATE ${MANAGER_PROJECTS_TABLE} 
-         SET project_name = ?, project_status = ?, pillar = ?, site = ?, current_pmo_gate = ?, dtit_involved = ?, ai_type = ?, foak_noak = ?,
-             target_g1_date = ?, target_g2_date = ?, target_g3_date = ?, target_closed_date = ?
-         WHERE project_id = ?`,
-        [
-          normalizeText(req.body.projectName), newStatus, normalizeText(req.body.pillars), normalizeText(req.body.sites),
-          normalizeText(req.body.currentPmoGate), normalizeText(req.body.dtitInvolved), normalizeText(req.body.aiAaAType),
-          normalizeText(req.body.foakNoak), 
-          targetG1Date, targetG2Date, targetG3Date, targetClosedDate,
-          projectId
-        ], req
-      );
-
-      // --- NEW: Automate Actual Phase Tracking in the Ledger Table ---
-      const curr = currentState.length > 0 ? currentState[0] : null;
-      const oldStatus = curr ? curr.project_status : null;
-
-      // If the status has actually changed, close the old phase and open a new one
-      if (oldStatus !== newStatus && newStatus) {
-        // 1. Close any currently open phase for this project
-        await bemQueryPromise(
-          `UPDATE ${MANAGER_PHASES_TABLE} SET end_date = CURDATE() WHERE project_id = ? AND end_date IS NULL`,
-          [projectId], req
-        );
-        // 2. Open the new phase
-        await bemQueryPromise(
-          `INSERT INTO ${MANAGER_PHASES_TABLE} (project_id, phase_name, start_date) VALUES (?, ?, CURDATE())`,
-          [projectId, newStatus], req
-        );
-      }
-    }
-
-    // --- 2. Update Yearly Savings safely ---
-    const yearKeys = Object.keys(req.body).filter(k => k.startsWith('year') && k.length === 8);
-    for (const key of yearKeys) {
-      const year = parseInt(key.replace('year', ''), 10);
-      const val = normalizeNumber(req.body[key]);
-
-      if (val !== null) {
-        const existingYear = await bemQueryPromise(
-          `SELECT project_id FROM ${MANAGER_YEARLY_TABLE} WHERE project_id = ? AND savings_year = ? LIMIT 1`,
-          [projectId, year], req
-        );
-        if (existingYear.length > 0) {
-          await bemQueryPromise(
-            `UPDATE ${MANAGER_YEARLY_TABLE} SET savings_value = ? WHERE project_id = ? AND savings_year = ?`,
-            [val, projectId, year], req
-          );
-        } else {
-          await bemQueryPromise(
-            `INSERT INTO ${MANAGER_YEARLY_TABLE} (project_id, savings_year, savings_value) VALUES (?, ?, ?)`,
-            [projectId, year, val], req
-          );
-        }
-      }
-    }
-
-    // --- 3. Update Metrics (KPIs) ---
-    const existingMetric = await bemQueryPromise(
-      `SELECT metrics_id FROM ${MANAGER_METRICS_TABLE} WHERE project_id = ? AND reporting_year = ? LIMIT 1`,
-      [projectId, currentYear], req
-    );
-
-    if (existingMetric.length > 0) {
-      await bemQueryPromise(
-        `UPDATE ${MANAGER_METRICS_TABLE} SET 
-         capacity_gain_value=?, capacity_gain_pct=?, dl_value=?, dl_equivalent=?, 
-         idl_value=?, idl_fte=?, yield_value=?, yield_gain_pct=?, quality_value=?, quality_cases=? 
-         WHERE metrics_id=?`,
-        [
-          normalizeNumber(req.body.capacityGainValue), normalizeNumber(req.body.capacityGainPercent),
-          normalizeNumber(req.body.dlValue), normalizeNumber(req.body.dlEquivalent),
-          normalizeNumber(req.body.idlValue), normalizeNumber(req.body.idlFte),
-          normalizeNumber(req.body.yieldValue), normalizeNumber(req.body.yieldPercentGain),
-          normalizeNumber(req.body.qualityValue), normalizeNumber(req.body.qualityCases),
-          existingMetric[0].metrics_id
-        ], req
-      );
-    } else {
-      await bemQueryPromise(
-        `INSERT INTO ${MANAGER_METRICS_TABLE} 
-         (project_id, reporting_year, capacity_gain_value, capacity_gain_pct, dl_value, dl_equivalent, idl_value, idl_fte, yield_value, yield_gain_pct, quality_value, quality_cases)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          projectId, currentYear,
-          normalizeNumber(req.body.capacityGainValue), normalizeNumber(req.body.capacityGainPercent),
-          normalizeNumber(req.body.dlValue), normalizeNumber(req.body.dlEquivalent),
-          normalizeNumber(req.body.idlValue), normalizeNumber(req.body.idlFte),
-          normalizeNumber(req.body.yieldValue), normalizeNumber(req.body.yieldPercentGain),
-          normalizeNumber(req.body.qualityValue), normalizeNumber(req.body.qualityCases)
-        ], req
-      );
-    }
-
-    // --- 4. Update Comments ---
-    const commentText = normalizeText(req.body.comment);
-    if (commentText !== null) {
-      const existingComment = await bemQueryPromise(`SELECT comment_id FROM ${MANAGER_COMMENTS_TABLE} WHERE project_id = ? ORDER BY created_at DESC LIMIT 1`, [projectId], req);
-      
-      if (existingComment.length > 0) {
-         await bemQueryPromise(`UPDATE ${MANAGER_COMMENTS_TABLE} SET comment_text = ? WHERE comment_id = ?`, [commentText, existingComment[0].comment_id], req);
-      } else {
-         await bemQueryPromise(`INSERT INTO ${MANAGER_COMMENTS_TABLE} (project_id, comment_text) VALUES (?, ?)`, [projectId, commentText], req);
-      }
-    }
-
-    traceEnd(trace, { outcome: 'success', projectId });
-    return res.json({ message: 'Project updated successfully.' });
-  } catch (err) {
-    traceError(trace, err);
-    return res.status(500).json({ message: err.message });
-  }
-});
 
 // =====================================
 // Start server
