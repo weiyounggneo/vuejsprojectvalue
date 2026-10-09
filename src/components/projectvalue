@@ -40,7 +40,6 @@
     <!-- WRAPPER FOR PDF EXPORT -->
     <div ref="pdfExportArea" class="pdf-export-container">
       
-      <div class="banner" v-if="activeTab === 'grid'">{{ pageBanner }}</div>
 
       <div class="upload-section" v-if="activeTab === 'grid'">
         <label
@@ -165,10 +164,11 @@
             @row-click="selectRow"
             :rowStyleClass="rowClassFn"
           >
+            <!-- UPDATED: Inline Editing block elements -->
             <template #table-row="props">
               <span v-if="['capacity_improvement', 'yield_savings', 'people_productivity', 'quality_improvement'].includes(props.column.field)">
                 
-                <span v-if="editingCell.rowId === props.row.metric_id && editingCell.field === props.column.field">
+                <div v-if="editingCell.rowId === props.row.metric_id && editingCell.field === props.column.field" style="width: 100%;">
                   <input
                     type="number"
                     step="any"
@@ -179,16 +179,16 @@
                     v-focus
                     class="inline-input"
                   />
-                </span>
+                </div>
                 
-                <span 
+                <div 
                   v-else 
                   @dblclick.stop="startInlineEdit(props.row, props.column.field, props.row[props.column.field])" 
                   class="editable-cell" 
                   title="Double-click to edit"
                 >
                   {{ props.formattedRow[props.column.field] }}
-                </span>
+                </div>
               </span>
               <span v-else>
                 {{ props.formattedRow[props.column.field] }}
@@ -232,12 +232,12 @@
           No KPIs selected. Please check at least one KPI type above.
         </div>
 
-        <!-- NEW: Portfolio Cumulative Stacked Bar Chart (Moved to Top) -->
+        <!-- Portfolio Cumulative Stacked Bar Chart -->
         <div class="chart-card" style="margin-bottom: 24px;" v-if="selectedKPIs.length > 0">
           <apexchart type="line" height="450" :options="stackedBarChartData.options" :series="stackedBarChartData.series"></apexchart>
         </div>
 
-        <!-- Metric-Specific Line Charts (Moved Below) -->
+        <!-- Metric-Specific Line Charts -->
         <div class="charts-grid" :class="gridLayoutClass" v-if="selectedKPIs.length > 0">
           <div class="chart-card" v-if="selectedKPIs.includes('capacity')">
             <apexchart type="line" height="350" :options="chartData.capacity.options" :series="chartData.capacity.series"></apexchart>
@@ -579,7 +579,6 @@ export default {
       // Selected KPIs array for dynamic filtering
       selectedKPIs: ['capacity', 'yield', 'productivity', 'quality'],
       
-      pageBanner: 'Project Value Entry',
       columns: [],
       rows: [],
       filteredRows: [],
@@ -647,7 +646,7 @@ export default {
     gridLayoutClass() {
       const len = this.selectedKPIs.length;
       if (len === 1) return 'grid-1';
-      if (len === 2) return 'grid-2'; // Now maps to 1 column stacked layout
+      if (len === 2) return 'grid-2'; 
       if (len === 3) return 'grid-3';
       return 'grid-4';
     },
@@ -716,7 +715,7 @@ export default {
         }
       });
 
-      // NEW: Calculate the global running total for the overlay line
+      // Calculate the global running total for the overlay line
       if (series.length > 0) {
         const totalLineData = sortedQuarters.map((q, index) => {
           let sum = 0;
@@ -733,7 +732,7 @@ export default {
         });
       }
 
-      // NEW: Dynamically assign deep, readable colors for bars and a stark gold for the line
+      // Dynamically assign deep, readable colors for bars and a stark gold for the line
       const baseColors = ['#0A2D55', '#117A65', '#6C3483', '#8B0000', '#2C3E50', '#003366', '#4B0082', '#004D40', '#800000', '#2F4F4F'];
       const chartColors = series.map((s, index) => {
         if (s.type === 'line') return '#FFB300'; // Stark Gold/Yellow for the line
@@ -1613,7 +1612,7 @@ export default {
 
     openSpotfire() {
       if (this.isProcessing || this.isPageLoading) return;
-      window.open('https://spotfirecbeit.mua.st.com/spotfire/wp/OpenAnalysis?file=4cfdf5f1-3884-44c5-aaf5-9380702d03d0', '_blank');
+      window.open('https://mda-spotfire-analysts.westeurope.azure.st.com/spotfire/wp/OpenAnalysis?file=efd28141-f4a6-4022-89b8-0644ee14e4bd', '_blank');
     },
 
     logout() {
@@ -2038,7 +2037,10 @@ export default {
   color: #fff;
 }
 
-/* Inline Edit CSS */
+/* ========================================================== */
+/* NEW: CSS for expanding Inline Editable Cells completely    */
+/* ========================================================== */
+
 .inline-edit-hint {
   background-color: #e7edf5;
   color: #1f5fa8;
@@ -2046,30 +2048,41 @@ export default {
   border-radius: 8px;
   margin-bottom: 12px;
   font-size: 0.95rem;
+  border: 1px solid #c2d5ee;
 }
 
 .editable-cell {
   cursor: pointer;
-  border-bottom: 1px dashed transparent;
-  transition: border-color 0.2s, background-color 0.2s;
-  display: inline-block;
+  border: 1px dashed transparent;
+  border-radius: 4px;
+  transition: all 0.2s ease-in-out;
+  display: flex;            /* Makes the hit box block-level */
+  align-items: center;      /* Keeps the text vertically centered */
+  width: 100%;              /* Forces the hit box to stretch */
   min-width: 50px;
-  min-height: 20px;
+  min-height: 30px;         /* Expands the physical clickable height */
+  padding: 2px 6px;         /* Adds a comfortable padding inside the box */
+  box-sizing: border-box;
 }
 
 .editable-cell:hover {
-  border-bottom: 1px dashed #1f5fa8;
+  border-color: #1f5fa8;
   background-color: #f0f4f8;
 }
 
 .inline-input {
-  width: 100px;
-  padding: 4px;
-  border: 1px solid #1f5fa8;
+  display: block;
+  width: 100% !important;   /* Forces the input to overwrite everything and stretch */
+  min-height: 32px;
+  padding: 6px 8px;         /* Thicker padding for a better input experience */
+  border: 2px solid #1f5fa8; /* Visually pops when active */
   border-radius: 4px;
   outline: none;
   font-family: inherit;
   font-size: inherit;
+  box-sizing: border-box;
+  background-color: #fff;
+  box-shadow: 0 0 5px rgba(31, 95, 168, 0.2);
 }
 
 /* Original CSS */
