@@ -42,6 +42,7 @@
         class="tab-btn"
         :class="{ active: activeTab === 'grid' }"
         @click="activeTab = 'grid'"
+        :disabled="isProcessing || isPageLoading"
       >
         Data Entry Grid
       </button>
@@ -49,6 +50,7 @@
         class="tab-btn"
         :class="{ active: activeTab === 'analytics' }"
         @click="activeTab = 'analytics'"
+        :disabled="isProcessing || isPageLoading"
       >
         Portfolio Overview
       </button>
@@ -56,6 +58,7 @@
         class="tab-btn"
         :class="{ active: activeTab === 'timeline' }"
         @click="activeTab = 'timeline'"
+        :disabled="isProcessing || isPageLoading"
       >
         Project Timeline
       </button>
@@ -160,8 +163,8 @@
       <!-- ACTION BUTTONS (Moved above the table) -->
       <div class="actions" style="margin: 0 20px 16px 20px; background: white; padding: 16px 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05); border: 1px solid #e0e6ed; justify-content: flex-start;">
         <!-- HIDE ADD/UPDATE FROM VIEWERS -->
-        <button v-if="isEditor" class="primary-btn" @click="openAddForm" :disabled="isProcessing || isPageLoading">Add</button>
-        <button v-if="isEditor" class="primary-btn" @click="openUpdateForm" :disabled="isProcessing || isPageLoading || !selectedRow">
+        <button v-if="isEditor" class="primary-btn" @click="openAddForm" :disabled="isProcessing || isPageLoading || !!tableLoadError || !columnVisibilityLoaded || !!columnVisibilityError">Add</button>
+        <button v-if="isEditor" class="primary-btn" @click="openUpdateForm" :disabled="isProcessing || isPageLoading || !selectedRow || !!tableLoadError || !columnVisibilityLoaded || !!columnVisibilityError">
           Update
         </button>
 
@@ -205,7 +208,10 @@
           Global View
         </button>
         <button @click="showColumnManager = true" :disabled="isProcessing || isPageLoading" class="view-btn">
-          Custom Columns
+          Show / Hide Columns
+        </button>
+        <button @click="refreshProjectData" :disabled="isProcessing || isPageLoading" class="view-btn">
+          Refresh Data & Columns
         </button>
       </div>
 
@@ -265,9 +271,14 @@
       </div>
 
       <div class="table-section">
+        <div v-if="tableLoadError" class="project-data-error" role="alert">{{ tableLoadError }}</div>
+        <div v-if="columnVisibilityError" class="project-data-error" role="alert">{{ columnVisibilityError }} Editing is paused until visibility loads. Use "Refresh Data &amp; Columns" to retry.</div>
+        <div v-if="projectFieldsError" class="project-fields-notice" role="status">
+          Added project fields could not be loaded: {{ projectFieldsError }} Use "Refresh Data & Columns" to retry.
+        </div>
         <!-- HIDE EDIT HINT FROM VIEWERS -->
         <div v-if="isEditor" class="inline-edit-hint">
-          💡 <strong>Tip:</strong> Double-click any cell below to input or update its value directly. For multiple sites, separate them with commas (e.g., BSK, MUA). Use the preset view buttons below to quickly show or hide metadata.
+          💡 <strong>Tip:</strong> Double-click an editable cell to update its value. Use the data entry form to choose or clear actual milestone dates. For multiple sites, separate them with commas (e.g., BSK, MUA).
         </div>
 
         <div class="horizontal-scroll-wrapper">
@@ -281,17 +292,52 @@
             :row-style-class="rowClassFn"
           >
             <template #table-row="props">
-              <span v-if="props.column.field === 'projectName'">
-                <strong>{{ props.row.projectName }}</strong>
-              </span>
-
-              <span v-else>
+              <span>
                 <!-- Editing Mode -->
                 <div v-if="editingCell.rowId === props.row.projectId && editingCell.field === props.column.field" style="width: 100%;">
+                  <select
+                    v-if="props.column.customInputMode === 'dropdown'"
+                    v-model="editValue"
+                    @blur="saveInlineEdit(props.row)"
+                    @keyup.enter="saveInlineEdit(props.row)"
+                    @keyup.esc="cancelInlineEdit"
+                    v-focus
+                    class="inline-input"
+                  >
+                    <option :value="null">(Blank)</option>
+                    <option v-if="editValue != null && !(props.column.customOptions || []).includes(editValue)" :value="editValue" disabled>{{ editValue }} (refresh options)</option>
+                    <option v-for="option in props.column.customOptions" :key="option" :value="option">{{ option }}</option>
+                  </select>
+                  <select
+                    v-else-if="props.column.customType === 'boolean'"
+                    v-model="editValue"
+                    @blur="saveInlineEdit(props.row)"
+                    @keyup.enter="saveInlineEdit(props.row)"
+                    @keyup.esc="cancelInlineEdit"
+                    v-focus
+                    class="inline-input"
+                  >
+                    <option :value="null">(Blank)</option>
+                    <option :value="true">Yes</option>
+                    <option :value="false">No</option>
+                  </select>
                   <input
-                    v-if="props.column.formatType === 'date'"
+                    v-else-if="props.column.customType === 'number'"
+                    type="text"
+                    inputmode="decimal"
+                    v-model="editValue"
+                    @blur="saveInlineEdit(props.row)"
+                    @keyup.enter="saveInlineEdit(props.row)"
+                    @keyup.esc="cancelInlineEdit"
+                    v-focus
+                    class="inline-input"
+                  />
+                  <input
+                    v-else-if="props.column.formatType === 'date' || props.column.customType === 'date'"
                     type="date"
                     v-model="editValue"
+                    :min="props.column.customType === 'date' ? '1000-01-01' : undefined"
+                    :max="props.column.customType === 'date' ? '9999-12-31' : undefined"
                     @blur="saveInlineEdit(props.row)"
                     @keyup.enter="saveInlineEdit(props.row)"
                     @keyup.esc="cancelInlineEdit"
@@ -302,6 +348,7 @@
                     v-else-if="props.column.type === 'text'"
                     type="text"
                     v-model="editValue"
+                    :maxlength="props.column.customType === 'text' ? 255 : undefined"
                     @blur="saveInlineEdit(props.row)"
                     @keyup.enter="saveInlineEdit(props.row)"
                     @keyup.esc="cancelInlineEdit"
@@ -326,9 +373,16 @@
                   v-else
                   @dblclick.stop="startInlineEdit(props.row, props.column.field, props.row[props.column.field])"
                   class="editable-cell"
-                  :title="isEditor ? 'Double-click to edit' : ''"
+                  :class="{ 'readonly-cell': !canEditField(props.column.field) }"
+                  :title="canEditField(props.column.field) ? 'Double-click to edit' : ''"
                 >
-                  <template v-if="props.column.formatType === 'currency'">
+                  <template v-if="props.column.customColumn">
+                    {{ formatCustomField(props.column.customColumn, props.row.customFields?.[props.column.customColumn]) }}
+                  </template>
+                  <template v-else-if="props.column.field === 'projectName'">
+                    <strong>{{ props.row.projectName }}</strong>
+                  </template>
+                  <template v-else-if="props.column.formatType === 'currency'">
                     {{ formatCurrency(props.row[props.column.field]) }}
                   </template>
                   <template v-else-if="props.column.formatType === 'percent'">
@@ -364,6 +418,9 @@
           <div><strong>DTIT Involved:</strong> {{ selectedRow.dtitInvolved || '-' }}</div>
           <div><strong>AI/AA/A Type:</strong> {{ selectedRow.aiAaAType || '-' }}</div>
           <div><strong>FOAK/NOAK:</strong> {{ selectedRow.foakNoak || '-' }}</div>
+          <div v-for="field in projectFields" :key="field.columnName">
+            <strong>{{ field.label }}:</strong> {{ formatCustomField(field.columnName, selectedRow.customFields?.[field.columnName]) }}
+          </div>
         </div>
       </div>
     </div>
@@ -398,9 +455,9 @@
           </div>
         </div>
 
-        <!-- EXECUTIVE CARDS SECTION (cardsStartYear to current year) -->
+        <!-- EXECUTIVE CARDS SECTION (current year's cumulative figures) -->
         <div class="cards-year-bar">
-          <span class="sidebar-title">Cards show cumulative values for {{ cardsRangeLabel }}</span>
+          <span class="sidebar-title">Cards use the {{ cardsRangeLabel }} column (cumulative through {{ currentYear }})</span>
         </div>
 
         <div class="executive-cards-section">
@@ -436,6 +493,14 @@
               <span class="metric-count">{{ executiveCardsData.G3.count }} Proj</span>
             </div>
           </div>
+          <div class="metric-card bg-operationalised">
+            <h4>Operationalised</h4>
+            <div class="metric-content">
+              <span class="metric-value">{{ formatMillions(executiveCardsData.Operationalised.value) }}</span>
+              <span class="metric-divider">|</span>
+              <span class="metric-count">{{ executiveCardsData.Operationalised.count }} Proj</span>
+            </div>
+          </div>
         </div>
 
         <!-- SUMMARY TABLES SECTION (Side-by-Side) -->
@@ -448,7 +513,7 @@
                   <tr>
                     <th>Pillar</th>
                     <th style="text-align: center;">Count</th>
-                    <th style="text-align: right;">Value</th>
+                    <th style="text-align: right;">{{ currentYear }} Annual Value</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -472,8 +537,8 @@
                 <thead>
                   <tr>
                     <th>Year</th>
-                    <th style="text-align: right;">Actual</th>
-                    <th style="text-align: right;">Target</th>
+                    <th style="text-align: right;">Cumulative Actual</th>
+                    <th style="text-align: right;">Cumulative Target</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -508,10 +573,10 @@
               </div>
             </div>
 
-            <!-- CHART 2: Annualized Values -->
+            <!-- CHART 2: Annual increases derived from cumulative entries -->
             <div class="chart-card">
               <div class="chart-header">
-                <h3 class="chart-title">Annualized AI Values</h3>
+                <h3 class="chart-title">Annual AI Value Increase</h3>
               </div>
               <div class="chart-body">
                 <apexchart
@@ -557,7 +622,7 @@
 
           <div class="chart-card">
             <div class="chart-header">
-              <h3 class="chart-title">Pillars</h3>
+              <h3 class="chart-title">Pillars ({{ currentYear }} Annual Value)</h3>
             </div>
             <div class="chart-body">
               <apexchart
@@ -641,7 +706,7 @@
             <h3 class="chart-title">Milestone Tracking</h3>
             <!-- HIDE EDIT HINT FROM VIEWERS -->
             <div v-if="isEditor" class="inline-edit-hint" style="margin: 0; padding: 8px 12px; font-size: 0.85rem; width: 100%; box-sizing: border-box;">
-              💡 <strong>Tip:</strong> Double-click any Target or Actual date below to update it directly.
+              💡 <strong>Tip:</strong> Double-click a Target date to update it. Use Update Project Data to edit Actual dates.
             </div>
           </div>
           <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
@@ -649,6 +714,7 @@
               <thead style="position: sticky; top: 0; z-index: 10;">
                 <tr>
                   <th>Project Name</th>
+                  <th>PMO Gate</th>
                   
                   <th>Target G1</th>
                   <th>Actual G1</th>
@@ -677,10 +743,7 @@
 
                   <!-- Actual G1 -->
                   <td :class="getRagClass(item.actualG1Date, item.targetG1Date)">
-                    <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualG1Date'">
-                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
-                    </div>
-                    <div v-else @dblclick.stop="startInlineEdit(item, 'actualG1Date', item.actualG1Date)" class="editable-cell" :title="isEditor ? 'Double-click to edit' : ''">
+                    <div class="milestone-actual-value">
                       <strong>{{ item.actualG1Date ? formatDate(item.actualG1Date) : 'Pending' }}</strong>
                     </div>
                   </td>
@@ -697,10 +760,7 @@
 
                   <!-- Actual G2 -->
                   <td :class="getRagClass(item.actualG2Date, item.targetG2Date)">
-                    <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualG2Date'">
-                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
-                    </div>
-                    <div v-else @dblclick.stop="startInlineEdit(item, 'actualG2Date', item.actualG2Date)" class="editable-cell" :title="isEditor ? 'Double-click to edit' : ''">
+                    <div class="milestone-actual-value">
                       <strong>{{ item.actualG2Date ? formatDate(item.actualG2Date) : 'Pending' }}</strong>
                     </div>
                   </td>
@@ -717,10 +777,7 @@
 
                   <!-- Actual G3 -->
                   <td :class="getRagClass(item.actualG3Date, item.targetG3Date)">
-                    <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualG3Date'">
-                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
-                    </div>
-                    <div v-else @dblclick.stop="startInlineEdit(item, 'actualG3Date', item.actualG3Date)" class="editable-cell" :title="isEditor ? 'Double-click to edit' : ''">
+                    <div class="milestone-actual-value">
                       <strong>{{ item.actualG3Date ? formatDate(item.actualG3Date) : 'Pending' }}</strong>
                     </div>
                   </td>
@@ -737,10 +794,7 @@
 
                   <!-- Actual Closed -->
                   <td :class="getRagClass(item.actualClosedDate, item.targetClosedDate)">
-                    <div v-if="editingCell.rowId === item.projectId && editingCell.field === 'actualClosedDate'">
-                      <input type="date" v-model="editValue" @blur="saveInlineEdit(item)" @keyup.enter="saveInlineEdit(item)" @keyup.esc="cancelInlineEdit" v-focus class="inline-input" />
-                    </div>
-                    <div v-else @dblclick.stop="startInlineEdit(item, 'actualClosedDate', item.actualClosedDate)" class="editable-cell" :title="isEditor ? 'Double-click to edit' : ''">
+                    <div class="milestone-actual-value">
                       <strong>{{ item.actualClosedDate ? formatDate(item.actualClosedDate) : 'Pending' }}</strong>
                     </div>
                   </td>
@@ -809,7 +863,7 @@
           <div class="form-grid">
             <div class="form-group">
               <label for="projectId">Project ID <span style="color:red">*</span></label>
-              <input id="projectId" type="text" v-model="activeForm.projectId" :disabled="showUpdateForm || isProcessing" required />
+              <input id="projectId" type="text" v-model="activeForm.projectId" :disabled="showUpdateForm || isProcessing || !!addProjectCreatedId" required />
             </div>
 
             <div class="form-group">
@@ -817,7 +871,7 @@
               <input id="projectName" type="text" v-model="activeForm.projectName" :disabled="isProcessing" required />
             </div>
 
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('projectStatus')">
               <label for="projectStatus">Project Status</label>
               <select id="projectStatus" v-model="activeForm.projectStatus" :disabled="isProcessing">
                 <option value="">(Blank)</option>
@@ -825,7 +879,7 @@
               </select>
             </div>
 
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('pillars')">
               <label for="pillars">Pillars</label>
               <select id="pillars" v-model="activeForm.pillars" :disabled="isProcessing">
                 <option value="">(Blank)</option>
@@ -833,7 +887,7 @@
               </select>
             </div>
 
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('sites')">
               <label>Sites (Select Multiple)</label>
               <div class="checkbox-group">
                 <label><input type="checkbox" value="ALL" v-model="activeForm.sitesArray" :disabled="isProcessing"> ALL</label>
@@ -843,7 +897,7 @@
               </div>
             </div>
 
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('currentPmoGate')">
               <label for="currentPmoGate">Current PMO Gate</label>
               <select id="currentPmoGate" v-model="activeForm.currentPmoGate" :disabled="isProcessing">
                 <option value="">(Blank)</option>
@@ -851,7 +905,7 @@
               </select>
             </div>
 
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('dtitInvolved')">
               <label for="dtitInvolved">DTIT Involved</label>
               <select id="dtitInvolved" v-model="activeForm.dtitInvolved" :disabled="isProcessing">
                 <option value="">(Blank)</option>
@@ -859,7 +913,7 @@
               </select>
             </div>
 
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('aiAaAType')">
               <label for="aiAaAType">AI/AA/A type</label>
               <select id="aiAaAType" v-model="activeForm.aiAaAType" :disabled="isProcessing">
                 <option value="">(Blank)</option>
@@ -867,7 +921,7 @@
               </select>
             </div>
 
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('foakNoak')">
               <label for="foakNoak">FOAK/NOAK</label>
               <select id="foakNoak" v-model="activeForm.foakNoak" :disabled="isProcessing">
                 <option value="">(Blank)</option>
@@ -876,10 +930,66 @@
             </div>
           </div>
 
+          <template v-if="visibleProjectFields.length && !projectFieldsError">
+            <h4 class="section-heading">Additional Project Fields</h4>
+            <div class="form-grid">
+              <div v-for="field in visibleProjectFields" :key="field.columnName" class="form-group">
+                <label :for="'custom-form-' + field.columnName">{{ field.label }}</label>
+                <select
+                  v-if="field.inputMode === 'dropdown'"
+                  :id="'custom-form-' + field.columnName"
+                  v-model="activeForm.customFields[field.columnName]"
+                  :disabled="isProcessing"
+                >
+                  <option :value="null">(Blank)</option>
+                  <option v-if="activeForm.customFields[field.columnName] != null && !(field.options || []).includes(activeForm.customFields[field.columnName])" :value="activeForm.customFields[field.columnName]" disabled>{{ activeForm.customFields[field.columnName] }} (refresh options)</option>
+                  <option v-for="option in field.options" :key="option" :value="option">{{ option }}</option>
+                </select>
+                <select
+                  v-else-if="field.type === 'boolean'"
+                  :id="'custom-form-' + field.columnName"
+                  v-model="activeForm.customFields[field.columnName]"
+                  :disabled="isProcessing"
+                >
+                  <option :value="null">(Blank)</option>
+                  <option :value="true">Yes</option>
+                  <option :value="false">No</option>
+                </select>
+                <input
+                  v-else-if="field.type === 'number'"
+                  :id="'custom-form-' + field.columnName"
+                  type="text"
+                  inputmode="decimal"
+                  v-model="activeForm.customFields[field.columnName]"
+                  :disabled="isProcessing"
+                />
+                <input
+                  v-else-if="field.type === 'date'"
+                  :id="'custom-form-' + field.columnName"
+                  type="date"
+                  min="1000-01-01"
+                  max="9999-12-31"
+                  v-model="activeForm.customFields[field.columnName]"
+                  :disabled="isProcessing"
+                />
+                <input
+                  v-else
+                  :id="'custom-form-' + field.columnName"
+                  type="text"
+                  maxlength="255"
+                  v-model="activeForm.customFields[field.columnName]"
+                  :disabled="isProcessing"
+                />
+                <small class="project-field-help">{{ field.inputMode === 'dropdown' ? 'Options from Master Data Configuration: ' + field.configCategory + (field.options.length ? '' : '. No options yet; ask an admin to add them.') : customFieldHelp(field.type) }}</small>
+              </div>
+            </div>
+          </template>
+          <p v-if="projectFieldsError" class="project-fields-notice">Added fields are unavailable. Existing project details can still be saved.</p>
+
           <!-- SECTION 2: YEARLY DATA -->
-          <h4 class="section-heading">2. Yearly Data (Values)</h4>
-          <div class="form-grid">
-            <div class="form-group" v-for="year in trackingYears" :key="year">
+          <h4 v-if="hasVisibleYearlyFields" class="section-heading">2. Yearly Data (Values)</h4>
+          <div v-if="hasVisibleYearlyFields" class="form-grid">
+            <div class="form-group" v-for="year in visibleTrackingYears" :key="year">
               <label :for="'year' + year">{{ year }}</label>
               <input
                 :id="'year' + year"
@@ -890,108 +1000,114 @@
               />
             </div>
             
-            <div class="form-group full-width">
+            <div class="form-group full-width" v-if="isFieldShown('comment')">
               <label for="comment">Comment</label>
               <input id="comment" type="text" v-model="activeForm.comment" :disabled="isProcessing" />
             </div>
           </div>
 
           <!-- SECTION 3: KPIs -->
-          <h4 class="section-heading">3. Key Performance Indicators</h4>
-          <div class="form-grid">
-            <div class="form-group">
+          <h4 v-if="hasVisibleKpiFields" class="section-heading">3. Key Performance Indicators</h4>
+          <div v-if="hasVisibleKpiFields" class="form-grid">
+            <div class="form-group" v-if="isFieldShown('capacityGainValue')">
               <label for="capacityGainValue">Capacity Gain Value</label>
               <input id="capacityGainValue" type="number" step="any" v-model="activeForm.capacityGainValue" :disabled="isProcessing" />
             </div>
 
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('capacityGainPercent')">
               <label for="capacityGainPercent">Capacity Gain %</label>
               <input id="capacityGainPercent" type="number" step="any" v-model="activeForm.capacityGainPercent" :disabled="isProcessing" />
             </div>
 
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('dlValue')">
               <label for="dlValue">DL Value</label>
               <input id="dlValue" type="number" step="any" v-model="activeForm.dlValue" :disabled="isProcessing" />
             </div>
 
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('dlEquivalent')">
               <label for="dlEquivalent">DL Equivalent</label>
               <input id="dlEquivalent" type="number" step="any" v-model="activeForm.dlEquivalent" :disabled="isProcessing" />
             </div>
 
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('idlValue')">
               <label for="idlValue">IDL Value</label>
               <input id="idlValue" type="number" step="any" v-model="activeForm.idlValue" :disabled="isProcessing" />
             </div>
 
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('idlFte')">
               <label for="idlFte">IDL FTE</label>
               <input id="idlFte" type="number" step="any" v-model="activeForm.idlFte" :disabled="isProcessing" />
             </div>
 
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('yieldValue')">
               <label for="yieldValue">Yield Value</label>
               <input id="yieldValue" type="number" step="any" v-model="activeForm.yieldValue" :disabled="isProcessing" />
             </div>
 
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('yieldPercentGain')">
               <label for="yieldPercentGain">Yield (%) Gain</label>
               <input id="yieldPercentGain" type="number" step="any" v-model="activeForm.yieldPercentGain" :disabled="isProcessing" />
             </div>
 
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('qualityValue')">
               <label for="qualityValue">Quality Value</label>
               <input id="qualityValue" type="number" step="any" v-model="activeForm.qualityValue" :disabled="isProcessing" />
             </div>
 
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('qualityCases')">
               <label for="qualityCases">Quality Cases</label>
               <input id="qualityCases" type="number" step="any" v-model="activeForm.qualityCases" :disabled="isProcessing" />
             </div>
           </div>
 
           <!-- SECTION 4: TIMELINE TARGETS & ACTUALS -->
-          <h4 class="section-heading">4. Timeline Milestones (Targets & Actuals)</h4>
-          <div class="form-grid">
-            <div class="form-group">
+          <h4 v-if="hasVisibleMilestoneFields" class="section-heading">4. Timeline Milestones (Targets & Actuals)</h4>
+          <p v-if="hasVisibleMilestoneFields" class="project-field-help">Choose or clear actual milestone dates below. Dates you leave unchanged keep their current automatic behavior.</p>
+          <div v-if="hasVisibleMilestoneFields" class="form-grid">
+            <div class="form-group" v-if="isFieldShown('targetG1Date')">
               <label for="targetG1Date">Target G1 Date</label>
               <input id="targetG1Date" type="date" v-model="activeForm.targetG1Date" :disabled="isProcessing" />
             </div>
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('actualG1Date')">
               <label for="actualG1Date" style="color: #1f5fa8;">Actual G1 Date</label>
-              <input id="actualG1Date" type="date" v-model="activeForm.actualG1Date" :disabled="isProcessing" />
+              <input id="actualG1Date" type="date" v-model="activeForm.actualG1Date" min="1000-01-01" max="9999-12-31" :disabled="isProcessing || !isEditor" />
             </div>
 
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('targetG2Date')">
               <label for="targetG2Date">Target G2 Date</label>
               <input id="targetG2Date" type="date" v-model="activeForm.targetG2Date" :disabled="isProcessing" />
             </div>
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('actualG2Date')">
               <label for="actualG2Date" style="color: #1f5fa8;">Actual G2 Date</label>
-              <input id="actualG2Date" type="date" v-model="activeForm.actualG2Date" :disabled="isProcessing" />
+              <input id="actualG2Date" type="date" v-model="activeForm.actualG2Date" min="1000-01-01" max="9999-12-31" :disabled="isProcessing || !isEditor" />
             </div>
 
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('targetG3Date')">
               <label for="targetG3Date">Target G3 Date</label>
               <input id="targetG3Date" type="date" v-model="activeForm.targetG3Date" :disabled="isProcessing" />
             </div>
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('actualG3Date')">
               <label for="actualG3Date" style="color: #1f5fa8;">Actual G3 Date</label>
-              <input id="actualG3Date" type="date" v-model="activeForm.actualG3Date" :disabled="isProcessing" />
+              <input id="actualG3Date" type="date" v-model="activeForm.actualG3Date" min="1000-01-01" max="9999-12-31" :disabled="isProcessing || !isEditor" />
             </div>
 
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('targetClosedDate')">
               <label for="targetClosedDate">Target Closed Date</label>
               <input id="targetClosedDate" type="date" v-model="activeForm.targetClosedDate" :disabled="isProcessing" />
             </div>
-            <div class="form-group">
+            <div class="form-group" v-if="isFieldShown('actualClosedDate')">
               <label for="actualClosedDate" style="color: #1f5fa8;">Actual Closed Date</label>
-              <input id="actualClosedDate" type="date" v-model="activeForm.actualClosedDate" :disabled="isProcessing" />
+              <input id="actualClosedDate" type="date" v-model="activeForm.actualClosedDate" min="1000-01-01" max="9999-12-31" :disabled="isProcessing || !isEditor" />
             </div>
           </div>
 
+          <p v-if="showAddForm && addProjectCreatedId" class="project-fields-notice">
+            Project {{ addProjectCreatedId }} has already been created. Saving again finishes the remaining project values.
+          </p>
+          <p v-if="columnVisibilityError" class="project-data-error" role="alert">{{ columnVisibilityError }}</p>
+          <p v-if="formError" class="project-data-error" role="alert">{{ formError }}</p>
           <div class="modal-actions">
-            <button type="submit" class="actions primary-btn" :disabled="isProcessing">
+            <button type="submit" class="actions primary-btn" :disabled="isProcessing || !columnVisibilityLoaded || !!columnVisibilityError">
               {{ isProcessing ? 'Saving...' : 'Save Record' }}
             </button>
             <button type="button" class="actions cancel" @click="closeForm" :disabled="isProcessing">
@@ -1080,6 +1196,23 @@
           </p>
         </div>
 
+        <h4 class="section-heading">Additional Fields & Actual Date History</h4>
+        <p class="project-field-help">The latest 100 additional-field and actual-date edits are shown below. The Restore buttons above use the recorded project details and KPIs.</p>
+        <p v-if="customFieldHistoryError" class="project-fields-notice">{{ customFieldHistoryError }}</p>
+        <div v-else-if="isFetchingCustomFieldHistory" class="project-field-help">Loading field and actual-date history...</div>
+        <div v-else class="history-table-container">
+          <table class="history-table">
+            <thead><tr><th>Date Changed</th><th>Changed By</th><th>Field</th><th>Before</th><th>After</th></tr></thead>
+            <tbody>
+              <tr v-for="change in customFieldHistoryRows" :key="change.key">
+                <td>{{ change.changedAt }}</td><td>{{ change.changedBy }}</td><td>{{ change.label }}</td>
+                <td>{{ formatCustomField(change.columnName, change.before) }}</td>
+                <td>{{ formatCustomField(change.columnName, change.after) }}</td>
+              </tr>
+              <tr v-if="!customFieldHistoryRows.length"><td colspan="5">No additional-field or actual-date edits have been recorded.</td></tr>
+            </tbody>
+          </table>
+        </div>
         <div class="modal-actions">
           <button type="button" class="actions cancel" @click="showHistoryModal = false">Close</button>
         </div>
@@ -1153,9 +1286,10 @@
               type="checkbox"
               :checked="!col.hidden"
               @change="toggleColumnVisibility(col)"
-              :disabled="col.field === 'projectName'"
+              :disabled="col.field === 'projectName' || !isFieldShown(col.field)"
             />
             {{ col.label }}
+            <small v-if="!isFieldShown(col.field)"> (Hidden by admin)</small>
           </label>
         </div>
 
@@ -1183,6 +1317,21 @@ import { VueGoodTable } from 'vue-good-table-next';
 import VueApexCharts from 'vue3-apexcharts';
 import 'vue-good-table-next/dist/vue-good-table-next.css';
 import html2pdf from 'html2pdf.js';
+
+const MASTER_FIELDS = [
+  'projectId', 'projectName', 'projectStatus', 'pillars', 'sites',
+  'currentPmoGate', 'dtitInvolved', 'aiAaAType', 'foakNoak',
+  'targetG1Date', 'targetG2Date', 'targetG3Date', 'targetClosedDate'
+];
+const METRIC_FIELDS = [
+  'capacityGainValue', 'capacityGainPercent', 'dlValue', 'dlEquivalent',
+  'idlValue', 'idlFte', 'yieldValue', 'yieldPercentGain', 'qualityValue', 'qualityCases'
+];
+const ACTUAL_DATE_FIELDS = ['actualG1Date', 'actualG2Date', 'actualG3Date', 'actualClosedDate'];
+const ACTUAL_DATE_LABELS = {
+  actualG1Date: 'Actual G1 Date', actualG2Date: 'Actual G2 Date',
+  actualG3Date: 'Actual G3 Date', actualClosedDate: 'Actual Closed Date'
+};
 
 export default {
   name: 'ManagerYearlyTracking',
@@ -1225,7 +1374,7 @@ export default {
         endYear: currentYear + 3
       },
 
-      // First year included in the 4 executive cards (runs through the current year)
+      // First savings year, used as the baseline when accumulating annual site targets.
       cardsStartYear: 2025,
 
       // Analytics global chart filter
@@ -1240,6 +1389,7 @@ export default {
 
       // Global Page State
       activeTab: 'grid',
+      accessRight: localStorage.getItem('access_right') || '',
       isProcessing: false,
       isPageLoading: false,
       processingMessage: '',
@@ -1268,6 +1418,16 @@ export default {
 
       // Data State
       rows: [],
+      tableLoadError: '',
+      projectFields: [],
+      projectFieldsLoaded: false,
+      projectFieldsError: '',
+      customFieldHistory: [],
+      customFieldHistoryError: '',
+      isFetchingCustomFieldHistory: false,
+      formError: '',
+      addProjectCreatedId: null,
+      sessionEnded: false,
       siteTargets: [], 
       velocityData: [], 
       selectedRow: null,
@@ -1275,6 +1435,9 @@ export default {
       // Columns / Table refresh control
       tableColumns: [],
       hiddenColumns: {},
+      adminHiddenFields: [],
+      columnVisibilityLoaded: false,
+      columnVisibilityError: '',
       tableViewVersion: 0,
 
       // Inline Filters
@@ -1291,23 +1454,56 @@ export default {
       // Form State
       addForm: {},
       updateForm: {},
+      actualDateFormBaseline: {},
 
       // Static chart colors
       pieColors: ['#1f5fa8', '#28a745', '#ffd600', '#d93025', '#17a2b8', '#6c757d', '#6f42c1', '#fd7e14']
     };
   },
   computed: {
+    apiBaseUrl() {
+      return (process.env.VUE_APP_API_URL || '').trim().replace(/\/+$/, '');
+    },
+    customFieldHistoryRows() {
+      return this.customFieldHistory.flatMap(log => {
+        const before = log.before_values || {};
+        const after = log.after_values || {};
+        return [...new Set([...Object.keys(before), ...Object.keys(after)])].map(columnName => ({
+          key: `${log.audit_id}:${columnName}`,
+          columnName,
+          label: ACTUAL_DATE_LABELS[columnName] || this.projectFields.find(field => field.columnName === columnName)?.label || columnName,
+          before: before[columnName] ?? null,
+          after: after[columnName] ?? null,
+          changedAt: log.changed_at,
+          changedBy: log.changed_by
+        }));
+      });
+    },
     isAdmin() {
-      return localStorage.getItem('access_right') === 'admin';
+      return this.accessRight === 'admin';
     },
     // Check if the user is allowed to edit data
     isEditor() {
-      const role = localStorage.getItem('access_right');
-      return role === 'admin' || role === 'user';
+      return this.accessRight === 'admin' || this.accessRight === 'user';
     },
 
     activeForm() {
       return this.showAddForm ? this.addForm : this.updateForm;
+    },
+    visibleProjectFields() {
+      return this.projectFields.filter(field => this.isFieldShown(this.customFieldKey(field.columnName)));
+    },
+    visibleTrackingYears() {
+      return this.trackingYears.filter(year => this.isFieldShown(`year${year}`));
+    },
+    hasVisibleYearlyFields() {
+      return this.visibleTrackingYears.length > 0 || this.isFieldShown('comment');
+    },
+    hasVisibleKpiFields() {
+      return METRIC_FIELDS.some(field => this.isFieldShown(field));
+    },
+    hasVisibleMilestoneFields() {
+      return [...ACTUAL_DATE_FIELDS, 'targetG1Date', 'targetG2Date', 'targetG3Date', 'targetClosedDate'].some(field => this.isFieldShown(field));
     },
 
     trackingYears() {
@@ -1327,14 +1523,12 @@ export default {
       return `${this.timelineConfig.startYear} - ${this.timelineConfig.endYear}`;
     },
 
-    // Years summed by the 4 executive cards: cardsStartYear up to the current year
+    // Each year column already includes all previous years. Cards use one column only.
     cardYears() {
-      const start = Math.min(this.cardsStartYear, this.currentYear);
-      return Array.from({ length: this.currentYear - start + 1 }, (_, i) => start + i);
+      return [this.currentYear];
     },
     cardsRangeLabel() {
-      const years = this.cardYears;
-      return years.length === 1 ? String(years[0]) : `${years[0]} - ${years[years.length - 1]}`;
+      return String(this.currentYear);
     },
 
     globalHistoryColumns() {
@@ -1426,14 +1620,12 @@ export default {
         Overall: { count: 0, value: 0 },
         G1: { count: 0, value: 0 },
         G2: { count: 0, value: 0 },
-        G3: { count: 0, value: 0 }
+        G3: { count: 0, value: 0 },
+        Operationalised: { count: 0, value: 0 }
       };
 
-      // Sums cardsStartYear..currentYear directly, so it does not depend on the Timeline Window.
-      const yearKeys = this.cardYears.map(y => `year${y}`);
-
       this.filteredDashboardRows.forEach(row => {
-        const projectValue = yearKeys.reduce((sum, key) => sum + (Number(row[key]) || 0), 0);
+        const projectValue = this.projectSavingsValue(row, this.currentYear);
 
         result.Overall.count += 1;
         result.Overall.value += projectValue;
@@ -1449,6 +1641,9 @@ export default {
         } else if (gate === 'G3') {
           result.G3.count += 1;
           result.G3.value += projectValue;
+        } else if (gate === 'CLOSURE') {
+          result.Operationalised.count += 1;
+          result.Operationalised.value += projectValue;
         }
       });
 
@@ -1472,35 +1667,17 @@ export default {
     },
     siteTrendData() {
       const labels = this.trackingYears.map(String);
-      const rows = this.filteredDashboardRows;
+      // Stored entries are cumulative already; never run a second cumulative sum.
+      const cumulativeActual = this.trackingYears.map(year => this.portfolioSavingsValue(year) / 1000000);
+      const cumulativeExpected = this.trackingYears.map(year => this.siteTargetValue(year, true) / 1000000);
 
+      // Annual increases use the preceding calendar year's entry, even when it is
+      // outside the visible timeline window. Keep full precision before formatting.
       const actual = this.trackingYears.map(year => {
-        const total = rows.reduce((sum, row) => sum + (Number(row[`year${year}`]) || 0), 0);
-        return Number((total / 1000000).toFixed(1));
+        const total = this.filteredDashboardRows.reduce((sum, row) => sum + this.annualSavingsValue(row, year), 0);
+        return total / 1000000;
       });
-
-      const expected = this.trackingYears.map(year => {
-        let yearTargets = this.siteTargets.filter(t => t.target_year === year);
-        
-        if (this.dashboardFilter.selectedSite !== 'ALL') {
-          yearTargets = yearTargets.filter(t => t.site === this.dashboardFilter.selectedSite);
-        }
-
-        const totalExpected = yearTargets.reduce((sum, t) => sum + Number(t.expected_value), 0);
-        return Number((totalExpected / 1000000).toFixed(1));
-      });
-
-      let cumActualSum = 0;
-      const cumulativeActual = actual.map(val => {
-        cumActualSum += val;
-        return Number(cumActualSum.toFixed(1));
-      });
-
-      let cumExpectedSum = 0;
-      const cumulativeExpected = expected.map(val => {
-        cumExpectedSum += val;
-        return Number(cumExpectedSum.toFixed(1));
-      });
+      const expected = this.trackingYears.map(year => this.siteTargetValue(year) / 1000000);
 
       return { labels, actual, expected, cumulativeActual, cumulativeExpected };
     },
@@ -1550,7 +1727,7 @@ export default {
           labels: { style: { fontSize: '13px', fontWeight: 600 } }
         },
         yaxis: {
-          title: { text: 'Annualized Value (Millions)' },
+          title: { text: 'Annual Increase (Millions)' },
           labels: {
             formatter: value => `${Number(value).toFixed(1)}M`,
             style: { fontSize: '13px', fontWeight: 600 }
@@ -1570,8 +1747,8 @@ export default {
     },
     annualizedTrendSeries() {
       return [
-        { name: 'Annualized Actual', type: 'column', data: this.siteTrendData.actual },
-        { name: 'Annualized Expected', type: 'line', data: this.siteTrendData.expected }
+        { name: 'Annual Actual Increase', type: 'column', data: this.siteTrendData.actual },
+        { name: 'Annual Expected', type: 'line', data: this.siteTrendData.expected }
       ];
     },
 
@@ -1579,7 +1756,7 @@ export default {
     // SUMMARY TABLES DATA (Filtered)
     // ==========================================
     pillarSummaryData() {
-      const map = {};
+      const map = Object.create(null);
 
       this.filteredDashboardRows.forEach(row => {
         const pillar = row.pillars || 'Unassigned';
@@ -1589,12 +1766,8 @@ export default {
         
         map[pillar].count += 1;
         
-        let projectValue = 0;
-        this.trackingYears.forEach(year => {
-          projectValue += Number(row[`year${year}`]) || 0;
-        });
-        
-        map[pillar].value += projectValue;
+        // Pillars show the current year's contribution, not the cumulative balance.
+        map[pillar].value += this.annualSavingsValue(row, this.currentYear);
       });
 
       return Object.entries(map)
@@ -1605,24 +1778,11 @@ export default {
     yearlySummaryData() {
       const displayYears = [this.currentYear, this.currentYear + 1, this.currentYear + 2];
       
-      return displayYears.map(displayYear => {
-        let cumulativeActual = 0;
-        let cumulativeTarget = 0;
-
-        this.trackingYears.forEach(year => {
-          if (year <= displayYear) {
-            cumulativeActual += this.filteredDashboardRows.reduce((sum, row) => sum + (Number(row[`year${year}`]) || 0), 0);
-            
-            let yearTargets = this.siteTargets.filter(t => t.target_year === year);
-            if (this.dashboardFilter.selectedSite !== 'ALL') {
-              yearTargets = yearTargets.filter(t => t.site === this.dashboardFilter.selectedSite);
-            }
-            cumulativeTarget += yearTargets.reduce((sum, t) => sum + Number(t.expected_value), 0);
-          }
-        });
-
-        return { year: displayYear, actual: cumulativeActual, target: cumulativeTarget };
-      });
+      return displayYears.map(year => ({
+        year,
+        actual: this.portfolioSavingsValue(year),
+        target: this.siteTargetValue(year, true)
+      }));
     },
 
     // ==========================================
@@ -1757,22 +1917,85 @@ export default {
   async mounted() {
     const token = localStorage.getItem('token');
     if (!token) return this.$router.push('/login');
-
+    this.isPageLoading = true;
     try {
-      const response = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/check-auth`);
+      const response = await this.apiFetch(`${this.apiBaseUrl}/api/check-auth`);
       if (!response.ok) throw new Error('Session expired');
-    } catch {
-      localStorage.removeItem('token');
-      return this.$router.push('/login');
+      const auth = await response.json();
+      const role = auth.user?.access_right;
+      if (!['viewer', 'user', 'admin'].includes(role)) throw new Error('Your account is pending approval.');
+      this.accessRight = role;
+      localStorage.setItem('access_right', role);
+      await Promise.allSettled([
+        this.fetchTable({ manageLoading: false }),
+        this.fetchConfigOptions()
+      ]);
+    } catch (err) {
+      if (!err.isUnauthorized) this.logout();
+    } finally {
+      this.isPageLoading = false;
     }
-
-    // NEW: Fetch dynamic options along with table data
-    await Promise.all([
-      this.fetchTable(),
-      this.fetchConfigOptions()
-    ]);
   },
   methods: {
+    // Shared admin choices affect both the table and the data entry forms.
+    isFieldShown(field) {
+      return ['projectId', 'projectName'].includes(field) || !this.adminHiddenFields.includes(field);
+    },
+    async fetchColumnVisibility() {
+      try {
+        const response = await this.apiFetch(`${this.apiBaseUrl}/api/manager-column-visibility`);
+        if (response.status === 404) throw new Error('The backend needs the column visibility update. Replace server.js and run 004_column_visibility.sql.');
+        const data = await this.readApiJson(response, 'Could not load column visibility.');
+        if (!Array.isArray(data.hiddenFields) || data.hiddenFields.some(field => typeof field !== 'string') || !Number.isSafeInteger(data.revision) || data.revision < 0) throw new Error('The server returned invalid column visibility settings.');
+        this.adminHiddenFields = [...new Set(data.hiddenFields)].filter(field => !['projectId', 'projectName'].includes(field));
+        this.columnVisibilityLoaded = true;
+        this.columnVisibilityError = '';
+        if (this.editingCell.field && !this.isFieldShown(this.editingCell.field)) this.cancelInlineEdit();
+        this.rebuildTableColumns();
+        return true;
+      } catch (err) {
+        this.columnVisibilityLoaded = false;
+        this.columnVisibilityError = err.message || 'Could not load column visibility.';
+        return false;
+      }
+    },
+    // -------------------------------------------------
+    // PORTFOLIO VALUES (year columns store cumulative savings)
+    // -------------------------------------------------
+    projectSavingsValue(row, year) {
+      const value = Number(row[`year${year}`]);
+      return Number.isFinite(value) ? value : 0;
+    },
+
+    portfolioSavingsValue(year) {
+      return this.filteredDashboardRows.reduce((sum, row) => sum + this.projectSavingsValue(row, year), 0);
+    },
+
+    annualSavingsValue(row, year) {
+      const entry = row[`year${year}`];
+      // An unentered year contributes nothing; it is not a recorded loss of
+      // the previous year's savings. An explicit zero can still show a decrease.
+      if (entry === null || entry === undefined || String(entry).trim() === '' || !Number.isFinite(Number(entry))) {
+        return 0;
+      }
+      // Before a project's first entered year, the baseline is zero.
+      return this.projectSavingsValue(row, year) - this.projectSavingsValue(row, year - 1);
+    },
+
+    siteTargetValue(year, cumulative = false) {
+      // Site targets remain annual amounts. Accumulate them from the savings
+      // baseline only for cumulative comparisons, independently of the window.
+      return this.siteTargets.reduce((sum, target) => {
+        const targetYear = Number(target.target_year);
+        const matchesYear = cumulative
+          ? targetYear >= this.cardsStartYear && targetYear <= year
+          : targetYear === year;
+        const matchesSite = this.dashboardFilter.selectedSite === 'ALL' || target.site === this.dashboardFilter.selectedSite;
+        const value = Number(target.expected_value);
+        return matchesYear && matchesSite && Number.isFinite(value) ? sum + value : sum;
+      }, 0);
+    },
+
     // -------------------------------------------------
     // DROPDOWN METHODS
     // -------------------------------------------------
@@ -1792,7 +2015,7 @@ export default {
     // -------------------------------------------------
     async fetchConfigOptions() {
       try {
-        const response = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/config/options`);
+        const response = await this.apiFetch(`${this.apiBaseUrl}/api/config/options`);
         if (response.ok) {
           const data = await response.json();
           // Map the exact database category names (e.g. data.SITE) to the Vue state
@@ -1910,7 +2133,8 @@ export default {
     buildTimelineForm(base = {}, pruneOldYears = false) {
       const form = { 
         sitesArray: [], 
-        ...base 
+        ...base,
+        customFields: this.customFieldFormValues(base.customFields)
       };
       const selectedYearKeys = new Set(this.trackingYears.map(year => `year${year}`));
 
@@ -2029,46 +2253,250 @@ export default {
       options.headers['Authorization'] = 'Bearer ' + token;
 
       const response = await fetch(url, options);
-      if (response.status === 401) {
-        alert('Session expired. Please log in again.');
-        this.logout();
-        throw new Error('Session expired');
+      if (response.status === 401 || response.status === 403) {
+        if (!this.sessionEnded) {
+          this.sessionEnded = true;
+          alert('Session expired or access denied. Please log in again.');
+          this.logout();
+        }
+        const error = new Error('Session expired or access denied.');
+        error.isUnauthorized = true;
+        throw error;
       }
       return response;
     },
 
     // -------------------------------------------------
+    // ADDED PROJECT FIELDS
+    // -------------------------------------------------
+    async readApiJson(response, fallback) {
+      let data;
+      try { data = await response.json(); } catch { throw new Error(fallback); }
+      if (!response.ok) throw new Error(data?.message || fallback);
+      return data;
+    },
+    customFieldKey(columnName) {
+      return `customFields.${columnName}`;
+    },
+    customFieldForGrid(field) {
+      return this.projectFields.find(item => this.customFieldKey(item.columnName) === field);
+    },
+    customColumnDefs() {
+      return this.projectFields.map(field => ({
+        label: field.label,
+        field: this.customFieldKey(field.columnName),
+        // Keep DECIMAL data as strings; format and sort without rounding.
+        type: 'text',
+        customColumn: field.columnName,
+        customType: field.type,
+        customInputMode: field.inputMode || 'free',
+        customOptions: field.options || [],
+        formatFn: value => this.formatCustomField(field.columnName, value),
+        ...(field.type === 'number' ? { sortFn: this.compareCustomDecimals } : {}),
+        width: '160px',
+        hidden: false
+      }));
+    },
+    compareCustomDecimals(a, b) {
+      const empty = value => value == null || value === '';
+      if (empty(a) || empty(b)) return empty(a) ? (empty(b) ? 0 : -1) : 1;
+      const parts = value => {
+        const match = /^(-?)(\d+)(?:\.(\d{1,4}))?$/.exec(String(value));
+        if (!match) return null;
+        const integer = match[2].replace(/^0+(?=\d)/, '');
+        const fraction = (match[3] || '').padEnd(4, '0');
+        return { negative: !!match[1] && !(integer === '0' && fraction === '0000'), integer, fraction };
+      };
+      const x = parts(a), y = parts(b);
+      if (!x || !y) return String(a).localeCompare(String(b));
+      if (x.negative !== y.negative) return x.negative ? -1 : 1;
+      let result = x.integer.length === y.integer.length
+        ? (x.integer < y.integer ? -1 : x.integer > y.integer ? 1 : 0)
+        : x.integer.length < y.integer.length ? -1 : 1;
+      if (!result) result = x.fraction < y.fraction ? -1 : x.fraction > y.fraction ? 1 : 0;
+      return x.negative ? -result : result;
+    },
+    customFieldHelp(type) {
+      return {
+        text: 'Optional text, up to 255 characters.',
+        number: 'Optional number: up to 14 integer digits and 4 decimal places.',
+        date: 'Optional calendar date.',
+        boolean: 'Yes, No, or Blank.'
+      }[type] || '';
+    },
+    formatCustomField(columnName, value) {
+      if (value == null || value === '') return '—';
+      const field = this.projectFields.find(item => item.columnName === columnName);
+      if (field?.type === 'boolean' || typeof value === 'boolean') {
+        if ([true, 1, '1', 'true'].includes(value)) return 'Yes';
+        if ([false, 0, '0', 'false'].includes(value)) return 'No';
+      }
+      return field?.type === 'date' ? String(value).slice(0, 10) : String(value);
+    },
+    customFieldFormValues(source = {}) {
+      const values = source && typeof source === 'object' && !Array.isArray(source) ? source : {};
+      return Object.fromEntries(this.projectFields.map(field => {
+        let value = values[field.columnName] ?? null;
+        if (field.type === 'boolean' && (value === 0 || value === 1)) value = value === 1;
+        return [field.columnName, value];
+      }));
+    },
+    normalizeCustomField(field, value) {
+      if (value == null || (typeof value === 'string' && value.trim() === '')) return null;
+      if (field.type === 'text') {
+        if (typeof value !== 'string' || Array.from(value).length > 255) throw new Error(`${field.label} must be text with at most 255 characters.`);
+        const text = value.trim();
+        if (field.inputMode === 'dropdown' && !(field.options || []).includes(text)) throw new Error(`${field.label}: choose an option from ${field.configCategory}, or leave it blank. Use Refresh Data & Columns to load new options.`);
+        return text;
+      }
+      if (field.type === 'number') {
+        if (!['number', 'string'].includes(typeof value) || !/^-?\d{1,14}(?:\.\d{1,4})?$/.test(String(value).trim())) {
+          throw new Error(`${field.label} must have at most 14 integer digits and 4 decimal places.`);
+        }
+        return String(value).trim();
+      }
+      if (field.type === 'boolean') {
+        if (![true, false, 0, 1].includes(value)) throw new Error(`${field.label} must be Yes, No, or Blank.`);
+        return value === true || value === 1;
+      }
+      if (field.type === 'date') {
+        if (typeof value !== 'string' || !/^[1-9]\d{3}-\d{2}-\d{2}$/.test(value)) throw new Error(`${field.label} must be a valid YYYY-MM-DD date.`);
+        const [year, month, day] = value.split('-').map(Number);
+        const date = new Date(Date.UTC(year, month - 1, day));
+        if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) throw new Error(`${field.label} is not a valid calendar date.`);
+        return value;
+      }
+      throw new Error(`Unsupported field type for ${field.label}.`);
+    },
+    buildCustomFieldPayload(values = {}) {
+      return Object.fromEntries(this.visibleProjectFields.map(field => [field.columnName, this.normalizeCustomField(field, values[field.columnName])]));
+    },
+    normalizeActualDate(field, value) {
+      return this.normalizeCustomField({ type: 'date', label: ACTUAL_DATE_LABELS[field] }, value);
+    },
+    actualDateFormValues(record = {}) {
+      return Object.fromEntries(ACTUAL_DATE_FIELDS.map(field => [field, this.normalizeActualDate(field, record[field] ?? null)]));
+    },
+    addActualDateChanges(payload, form) {
+      for (const field of ACTUAL_DATE_FIELDS.filter(field => this.isFieldShown(field))) {
+        const value = this.normalizeActualDate(field, form[field] ?? null);
+        const original = this.normalizeActualDate(field, this.actualDateFormBaseline[field] ?? null);
+        // Omitted dates retain phase-derived defaults. Explicit null clears one.
+        if (value !== original) payload[field] = value;
+      }
+      return payload;
+    },
+    buildProjectPayload(record, { includeCustomFields = true } = {}) {
+      if (!this.columnVisibilityLoaded || this.columnVisibilityError) throw new Error('Refresh Data & Columns to load column visibility before saving.');
+      const payload = Object.fromEntries(MASTER_FIELDS.filter(field => this.isFieldShown(field)).map(field => [field, record[field] ?? null]));
+      payload.projectId = String(record.projectId || '').trim();
+      payload.projectName = String(record.projectName || '').trim();
+      if (!payload.projectId || !payload.projectName) throw new Error('Project ID and Project Name are required.');
+      if (this.isFieldShown('comment')) payload.comment = record.comment ?? null;
+      for (const field of [...METRIC_FIELDS, ...Object.keys(record).filter(key => /^year\d{4}$/.test(key))]) {
+        if (!this.isFieldShown(field)) continue;
+        const value = record[field];
+        if (value == null || String(value).trim() === '') payload[field] = null;
+        else {
+          if (!['number', 'string'].includes(typeof value) || !Number.isFinite(Number(value))) throw new Error(`${field} must be a finite number or Blank.`);
+          payload[field] = value;
+        }
+      }
+      if (includeCustomFields && this.projectFieldsLoaded && !this.projectFieldsError) payload.customFields = this.buildCustomFieldPayload(record.customFields || {});
+      return payload;
+    },
+    hydrateProjectRow(row) {
+      const source = row.customFields && typeof row.customFields === 'object' && !Array.isArray(row.customFields) ? row.customFields : {};
+      return { ...row, projectStatus: row.projectStatus ?? row.project_status ?? null, customFields: { ...source, ...this.customFieldFormValues(source) } };
+    },
+    async fetchProjectFields() {
+      try {
+        const response = await this.apiFetch(`${this.apiBaseUrl}/api/manager-project-fields`);
+        if (response.status === 404) throw new Error('The server has not enabled project field definitions yet.');
+        const fields = await this.readApiJson(response, 'Failed to load added project fields.');
+        if (!Array.isArray(fields)) throw new Error('The server returned an invalid field definition list.');
+        const seen = new Set();
+        for (const field of fields) {
+          if (!field || typeof field.columnName !== 'string' || !/^[a-z][a-z0-9_]{0,63}$/.test(field.columnName)
+            || ['constructor', 'prototype'].includes(field.columnName) || seen.has(field.columnName)
+            || typeof field.label !== 'string' || !field.label.trim() || !['text', 'number', 'date', 'boolean'].includes(field.type)) {
+            throw new Error('The server returned an invalid or duplicate project field definition.');
+          }
+          if (field.inputMode === undefined) field.inputMode = 'free';
+          if (!['free', 'dropdown'].includes(field.inputMode) || (field.inputMode === 'dropdown' && (field.type !== 'text' || typeof field.configCategory !== 'string' || !field.configCategory || !Array.isArray(field.options) || field.options.some(option => typeof option !== 'string')))) throw new Error('The server returned invalid dropdown settings.');
+          if (!Array.isArray(field.options)) field.options = [];
+          seen.add(field.columnName);
+        }
+        this.projectFields = fields;
+        this.projectFieldsLoaded = true;
+        this.projectFieldsError = '';
+        this.rebuildTableColumns();
+        if (this.showAddForm) this.addForm.customFields = this.customFieldFormValues(this.addForm.customFields);
+        if (this.showUpdateForm) this.updateForm.customFields = this.customFieldFormValues(this.updateForm.customFields);
+        return true;
+      } catch (err) {
+        this.projectFieldsError = err.message || 'Failed to load added project fields.';
+        return false;
+      }
+    },
+    canEditField(field) {
+      if (!this.isEditor || this.isProcessing || this.isPageLoading || this.tableLoadError || !this.columnVisibilityLoaded || this.columnVisibilityError || !this.isFieldShown(field) || ACTUAL_DATE_FIELDS.includes(field)) return false;
+      if (field === 'projectId' && !this.isAdmin) return false;
+      if (this.customFieldForGrid(field)) return this.projectFieldsLoaded && !this.projectFieldsError;
+      return this.allColumnDefs().some(column => column.field === field);
+    },
+    async refreshProjectData() {
+      if (this.isProcessing || this.isPageLoading) return;
+      this.cancelInlineEdit();
+      await this.fetchTable();
+    },
+    async fetchCustomFieldHistory(projectId) {
+      this.isFetchingCustomFieldHistory = true;
+      this.customFieldHistory = [];
+      this.customFieldHistoryError = '';
+      try {
+        const response = await this.apiFetch(`${this.apiBaseUrl}/api/manager-yearly/${encodeURIComponent(projectId)}/custom-fields/history`);
+        const data = await this.readApiJson(response, 'Added-field history is unavailable.');
+        if (!Array.isArray(data)) throw new Error('The server returned an invalid added-field history.');
+        this.customFieldHistory = data;
+      } catch (err) {
+        this.customFieldHistoryError = err.message || 'Added-field history is unavailable.';
+      } finally {
+        this.isFetchingCustomFieldHistory = false;
+      }
+    },
+
+    // -------------------------------------------------
     // DATA FETCHING
     // -------------------------------------------------
-    async fetchTable() {
-      this.isPageLoading = true;
+    async fetchTable({ manageLoading = true, selectedProjectId } = {}) {
+      if (manageLoading) this.isPageLoading = true;
+      this.tableLoadError = '';
+      const selectedId = selectedProjectId ?? this.selectedRow?.projectId;
       try {
         const [projectsRes, targetsRes, velocityRes] = await Promise.all([
-          this.apiFetch(`${process.env.VUE_APP_API_URL}/api/manager-yearly`),
-          this.apiFetch(`${process.env.VUE_APP_API_URL}/api/manager-site-targets`),
-          this.apiFetch(`${process.env.VUE_APP_API_URL}/api/manager-yearly/pipeline-velocity`)
+          this.apiFetch(`${this.apiBaseUrl}/api/manager-yearly`),
+          this.apiFetch(`${this.apiBaseUrl}/api/manager-site-targets`),
+          this.apiFetch(`${this.apiBaseUrl}/api/manager-yearly/pipeline-velocity`),
+          this.fetchProjectFields(),
+          this.fetchColumnVisibility()
         ]);
-
-        if (!projectsRes.ok) throw new Error('Failed to fetch project data');
-        if (!targetsRes.ok) throw new Error('Failed to fetch target data');
-        if (!velocityRes.ok) throw new Error('Failed to fetch velocity data');
-
-        const data = await projectsRes.json();
-        const targetsData = await targetsRes.json();
-        const velocityData = await velocityRes.json();
-        
-        this.rows = data.map(row => ({
-          ...row,
-          projectStatus: row.projectStatus || row.project_status
-        }));
-        
+        const [data, targetsData, velocityData] = await Promise.all([
+          this.readApiJson(projectsRes, 'Failed to fetch project data.'),
+          this.readApiJson(targetsRes, 'Failed to fetch site targets.'),
+          this.readApiJson(velocityRes, 'Failed to fetch pipeline velocity.')
+        ]);
+        if (![data, targetsData, velocityData].every(Array.isArray)) throw new Error('The server returned an invalid project data list.');
+        this.rows = data.map(row => this.hydrateProjectRow(row));
         this.siteTargets = targetsData;
         this.velocityData = velocityData;
-
+        this.selectedRow = selectedId == null ? null : this.rows.find(row => row.projectId === selectedId) || null;
+        return true;
       } catch (err) {
-        console.error(err);
+        if (!err.isUnauthorized) this.tableLoadError = err.message || 'Failed to load project data. Use Refresh to retry.';
+        return false;
       } finally {
-        this.isPageLoading = false;
+        if (manageLoading) this.isPageLoading = false;
       }
     },
 
@@ -2082,6 +2510,7 @@ export default {
       this.$router.push('/landing');
     },
     logout() {
+      this.accessRight = '';
       localStorage.removeItem('token');
       localStorage.removeItem('access_right');
       this.$router.push('/login');
@@ -2149,11 +2578,13 @@ export default {
         ...this.baseColumnDefs(),
         ...this.yearColumnDefs(),
         ...this.kpiColumnDefs(),
-        ...this.timelineColumnDefs()
+        ...this.timelineColumnDefs(),
+        ...this.customColumnDefs()
       ];
     },
 
     isColumnHidden(field, defaultHidden = false) {
+      if (!this.isFieldShown(field)) return true;
       return Object.prototype.hasOwnProperty.call(this.hiddenColumns, field)
         ? this.hiddenColumns[field]
         : defaultHidden;
@@ -2246,6 +2677,7 @@ export default {
     // COLUMN VISIBILITY
     // -------------------------------------------------
     toggleColumnVisibility(col) {
+      if (!this.isFieldShown(col.field) || col.field === 'projectName') return;
       this.hiddenColumns[col.field] = !this.isColumnHidden(col.field, col.hidden || false);
       this.rebuildTableColumns();
     },
@@ -2309,7 +2741,7 @@ export default {
       this.processingMessage = `Capturing full portfolio snapshot for ${this.manualSnapshotMonth}...`;
 
       try {
-        const response = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/admin/force-snapshot`, {
+        const response = await this.apiFetch(`${this.apiBaseUrl}/api/admin/force-snapshot`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ snapshotMonth: this.manualSnapshotMonth })
@@ -2339,11 +2771,13 @@ export default {
       this.showHistoryModal = true;
       this.isFetchingHistory = true;
       this.historyData = [];
+      const historyProject = this.selectedRow;
 
       try {
-        const response = await this.apiFetch(
-          `${process.env.VUE_APP_API_URL}/api/manager-yearly/${this.selectedRow.projectId}/history`
-        );
+        const [response] = await Promise.all([
+          this.apiFetch(`${this.apiBaseUrl}/api/manager-yearly/${encodeURIComponent(historyProject.projectId)}/history`),
+          this.fetchCustomFieldHistory(historyProject.projectId)
+        ]);
 
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
@@ -2351,27 +2785,28 @@ export default {
         }
 
         const historicalRecords = await response.json();
+        if (!Array.isArray(historicalRecords)) throw new Error('The server returned an invalid project history.');
 
         const currentState = {
           history_id: 'current',
-          project_id: this.selectedRow.projectId,
+          project_id: historyProject.projectId,
           changed_at: 'Current Status',
           changed_by: 'Active Record',
           action_type: 'CURRENT',
-          project_name: this.selectedRow.projectName,
-          project_status: this.selectedRow.projectStatus,
-          current_pmo_gate: this.selectedRow.currentPmoGate,
-          capacity_gain_value: this.selectedRow.capacityGainValue,
-          capacity_gain_pct: this.selectedRow.capacityGainPercent,
-          dl_value: this.selectedRow.dlValue,
-          dl_equivalent: this.selectedRow.dlEquivalent,
-          idl_value: this.selectedRow.idlValue,
-          idl_fte: this.selectedRow.idlFte,
-          yield_value: this.selectedRow.yieldValue,
-          yield_gain_pct: this.selectedRow.yieldPercentGain,
-          quality_value: this.selectedRow.qualityValue,
-          quality_cases: this.selectedRow.qualityCases,
-          comment_text: this.selectedRow.comment
+          project_name: historyProject.projectName,
+          project_status: historyProject.projectStatus,
+          current_pmo_gate: historyProject.currentPmoGate,
+          capacity_gain_value: historyProject.capacityGainValue,
+          capacity_gain_pct: historyProject.capacityGainPercent,
+          dl_value: historyProject.dlValue,
+          dl_equivalent: historyProject.dlEquivalent,
+          idl_value: historyProject.idlValue,
+          idl_fte: historyProject.idlFte,
+          yield_value: historyProject.yieldValue,
+          yield_gain_pct: historyProject.yieldPercentGain,
+          quality_value: historyProject.qualityValue,
+          quality_cases: historyProject.qualityCases,
+          comment_text: historyProject.comment
         };
 
         this.historyData = [currentState, ...historicalRecords];
@@ -2389,7 +2824,7 @@ export default {
       this.globalHistoryData = [];
 
       try {
-        const response = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/manager-yearly/history/all`);
+        const response = await this.apiFetch(`${this.apiBaseUrl}/api/manager-yearly/history/all`);
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
           throw new Error(errData.message || `Backend Server returned ${response.status}`);
@@ -2446,7 +2881,7 @@ export default {
     },
 
     async restoreHistoricalRecord(log) {
-      if (this.isProcessing || log.action_type === 'CURRENT') return;
+      if (!this.isEditor || this.isProcessing || log.action_type === 'CURRENT') return;
 
       const confirmed = confirm(`Are you sure you want to revert to the values from ${log.changed_at}?`);
       if (!confirmed) return;
@@ -2455,7 +2890,14 @@ export default {
       this.processingMessage = 'Restoring record...';
 
       try {
-        const payload = {
+        // These snapshots contain only selected fields. Read the current row so
+        // unsnapshotted master data is retained by the existing whole-row PUT.
+        const liveResponse = await this.apiFetch(`${this.apiBaseUrl}/api/manager-yearly`);
+        const liveRows = await this.readApiJson(liveResponse, 'Could not load the current project before restoring.');
+        if (!Array.isArray(liveRows)) throw new Error('The server returned an invalid project list.');
+        const liveRow = liveRows.find(row => row.projectId === log.project_id);
+        if (!liveRow) throw new Error('This project no longer exists.');
+        const restoredFields = {
           projectName: log.project_name,
           projectStatus: log.project_status,
           currentPmoGate: log.current_pmo_gate,
@@ -2471,8 +2913,8 @@ export default {
           qualityValue: log.quality_value,
           qualityCases: log.quality_cases
         };
-
-        const response = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/manager-yearly/${log.project_id}`, {
+        const payload = this.buildProjectPayload({ ...liveRow, ...restoredFields }, { includeCustomFields: false });
+        const response = await this.apiFetch(`${this.apiBaseUrl}/api/manager-yearly/${encodeURIComponent(log.project_id)}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -2507,13 +2949,12 @@ export default {
     // INLINE EDITING
     // -------------------------------------------------
     startInlineEdit(row, field, currentValue) {
-      // Instantly block viewers from triggering the edit mode
-      if (!this.isEditor) return; 
-
+      if (!this.canEditField(field)) return;
       this.editingCell = { rowId: row.projectId, field };
-      
-      // Standardize date fields for the input calendar UI if it's a date field
-      if (['targetG1Date', 'targetG2Date', 'targetG3Date', 'targetClosedDate', 'actualG1Date', 'actualG2Date', 'actualG3Date', 'actualClosedDate'].includes(field)) {
+      const custom = this.customFieldForGrid(field);
+      if (custom) {
+        this.editValue = this.customFieldFormValues(row.customFields)[custom.columnName];
+      } else if (['targetG1Date', 'targetG2Date', 'targetG3Date', 'targetClosedDate'].includes(field)) {
         this.editValue = currentValue ? String(currentValue).slice(0, 10) : '';
       } else {
         this.editValue = currentValue;
@@ -2525,49 +2966,64 @@ export default {
     },
     async saveInlineEdit(row) {
       const field = this.editingCell.field;
-      if (!field) return;
-
-      let newValue = this.editValue;
-      const stringFields = [
-        'projectName',
-        'projectId',
-        'projectStatus',
-        'pillars',
-        'sites',
-        'currentPmoGate',
-        'dtitInvolved',
-        'aiAaAType',
-        'foakNoak',
-        'comment',
-        'targetG1Date',
-        'actualG1Date',
-        'targetG2Date',
-        'actualG2Date',
-        'targetG3Date',
-        'actualG3Date',
-        'targetClosedDate',
-        'actualClosedDate'
-      ];
-
-      if (!stringFields.includes(field)) {
-        newValue = newValue === '' || newValue === null ? null : Number(newValue);
-      }
-
-      const oldVal = row[field];
-      row[field] = newValue;
-      this.cancelInlineEdit();
-
+      if (!field || this.editingCell.rowId !== row.projectId || !this.canEditField(field)) return;
+      const original = this.rows.find(item => item.projectId === row.projectId) || row;
+      const custom = this.customFieldForGrid(field);
+      let payload, method, newValue, nextProjectId = original.projectId;
       try {
-        const response = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/manager-yearly/${row.projectId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(row)
-        });
-
-        if (!response.ok) throw new Error('Failed to update via inline edit');
+        if (custom) {
+          newValue = this.normalizeCustomField(custom, this.editValue);
+          const oldValue = this.normalizeCustomField(custom, original.customFields?.[custom.columnName]);
+          const unchanged = custom.type === 'number' && newValue != null && oldValue != null
+            ? this.compareCustomDecimals(newValue, oldValue) === 0 : newValue === oldValue;
+          if (unchanged) return this.cancelInlineEdit();
+          payload = { customFields: { [custom.columnName]: newValue } };
+          method = 'PATCH';
+        } else {
+          newValue = this.editValue;
+          if (!MASTER_FIELDS.includes(field) && field !== 'comment') {
+            newValue = newValue === '' || newValue == null ? null : Number(newValue);
+            if (newValue !== null && !Number.isFinite(newValue)) throw new Error('Enter a finite number or Blank.');
+          }
+          const draft = { ...original, [field]: newValue };
+          if (field === 'projectId') {
+            nextProjectId = String(newValue || '').trim();
+            if (!nextProjectId) throw new Error('Project ID cannot be empty.');
+            draft.projectId = original.projectId;
+          }
+          payload = this.buildProjectPayload(draft, { includeCustomFields: false });
+          if (field === 'projectId') payload.newProjectId = nextProjectId;
+          method = 'PUT';
+        }
       } catch (err) {
-        alert('Update failed, reverting change: ' + err.message);
-        row[field] = oldVal;
+        alert(err.message);
+        return;
+      }
+      this.isProcessing = true;
+      this.processingMessage = `Updating ${custom ? custom.label : field}...`;
+      this.cancelInlineEdit();
+      try {
+        const suffix = custom ? '/custom-fields' : '';
+        const response = await this.apiFetch(`${this.apiBaseUrl}/api/manager-yearly/${encodeURIComponent(original.projectId)}${suffix}`, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        await this.readApiJson(response, 'Failed to update the project.');
+        if (custom) {
+          const updated = this.hydrateProjectRow({ ...original, customFields: { ...original.customFields, [custom.columnName]: newValue } });
+          this.rows = this.rows.map(item => item.projectId === original.projectId ? updated : item);
+          if (this.selectedRow?.projectId === original.projectId) this.selectedRow = updated;
+        } else {
+          // Reload phase-derived dates and any values the server normalized.
+          const refreshed = await this.fetchTable({ selectedProjectId: nextProjectId });
+          if (!refreshed && !this.sessionEnded) alert('Update saved, but the project list could not be refreshed. Use Refresh Data & Columns.');
+        }
+      } catch (err) {
+        if (!err.isUnauthorized) alert('Update failed: ' + err.message);
+      } finally {
+        this.isProcessing = false;
+        this.processingMessage = '';
       }
     },
 
@@ -2606,6 +3062,7 @@ export default {
         targetClosedDate: null,
         actualClosedDate: null
       };
+      form.customFields = this.customFieldFormValues();
 
       this.trackingYears.forEach(year => {
         form[`year${year}`] = null;
@@ -2614,13 +3071,20 @@ export default {
       return form;
     },
     openAddForm() {
+      if (!this.isEditor || this.isProcessing || this.isPageLoading || this.tableLoadError || !this.columnVisibilityLoaded || this.columnVisibilityError) return;
+      this.cancelInlineEdit();
+      this.formError = '';
+      this.addProjectCreatedId = null;
       this.addForm = this.emptyForm();
+      this.actualDateFormBaseline = this.actualDateFormValues(this.addForm);
       this.showAddForm = true;
       this.showUpdateForm = false;
     },
     openUpdateForm() {
+      if (!this.isEditor || this.isProcessing || this.isPageLoading || this.tableLoadError || !this.columnVisibilityLoaded || this.columnVisibilityError) return;
       if (!this.selectedRow) return alert('Please select a row to update.');
-
+      this.cancelInlineEdit();
+      this.formError = '';
       this.updateForm = this.buildTimelineForm({ ...this.selectedRow }, false);
       
       this.updateForm.sitesArray = this.selectedRow.sites 
@@ -2638,6 +3102,7 @@ export default {
       
       this.updateForm.targetClosedDate = this.selectedRow.targetClosedDate ? String(this.selectedRow.targetClosedDate).slice(0, 10) : null;
       this.updateForm.actualClosedDate = this.selectedRow.actualClosedDate ? String(this.selectedRow.actualClosedDate).slice(0, 10) : null;
+      this.actualDateFormBaseline = this.actualDateFormValues(this.updateForm);
 
       this.showUpdateForm = true;
       this.showAddForm = false;
@@ -2645,63 +3110,82 @@ export default {
     closeForm() {
       this.showAddForm = false;
       this.showUpdateForm = false;
+      this.formError = '';
+      this.addProjectCreatedId = null;
+      this.actualDateFormBaseline = {};
     },
     async submitAddForm() {
+      if (!this.isEditor || this.isProcessing || this.isPageLoading) return;
+      this.formError = '';
+      let payload;
+      try {
+        const sites = Array.isArray(this.addForm.sitesArray) ? this.addForm.sitesArray.join(', ') : '';
+        payload = this.addActualDateChanges(this.buildProjectPayload({ ...this.addForm, sites }), this.addForm);
+        if (this.addProjectCreatedId && payload.projectId !== this.addProjectCreatedId) throw new Error('Keep the ID of the project that has already been created.');
+      } catch (err) { this.formError = err.message; return; }
       this.isProcessing = true;
       this.processingMessage = 'Creating Project Metadata...';
-      
-      this.addForm.sites = Array.isArray(this.addForm.sitesArray) ? this.addForm.sitesArray.join(', ') : '';
-
       try {
-        const response = await this.apiFetch(`${process.env.VUE_APP_API_URL}/api/manager-yearly`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(this.addForm)
-        });
-        if (!response.ok) throw new Error('Failed to create project metadata.');
-
+        let createdNow = false;
+        if (!this.addProjectCreatedId) {
+          const response = await this.apiFetch(`${this.apiBaseUrl}/api/manager-yearly`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+          });
+          const result = await this.readApiJson(response, 'Failed to create project metadata.');
+          this.addProjectCreatedId = result?.project_id || payload.projectId;
+          this.actualDateFormBaseline = this.actualDateFormValues(this.addForm);
+          createdNow = true;
+        }
         this.processingMessage = 'Saving Financial Data & KPIs...';
-        const updateResponse = await this.apiFetch(
-          `${process.env.VUE_APP_API_URL}/api/manager-yearly/${this.addForm.projectId}`,
-          {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(this.addForm)
-          }
-        );
-
-        if (!updateResponse.ok) throw new Error('Project created, but failed to save financial data.');
-
+        const updatePayload = { ...payload };
+        // The first POST already saved custom fields. A retry may include edits.
+        if (createdNow) {
+          delete updatePayload.customFields;
+          ACTUAL_DATE_FIELDS.forEach(field => delete updatePayload[field]);
+        }
+        const updateResponse = await this.apiFetch(`${this.apiBaseUrl}/api/manager-yearly/${encodeURIComponent(this.addProjectCreatedId)}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updatePayload)
+        });
+        await this.readApiJson(updateResponse, 'Project created, but financial data could not be saved.');
+        const projectId = this.addProjectCreatedId;
         this.closeForm();
-        await this.fetchTable();
+        await this.fetchTable({ selectedProjectId: projectId });
       } catch (err) {
-        alert(err.message);
+        if (!err.isUnauthorized) {
+          this.formError = this.addProjectCreatedId
+            ? `Project ${this.addProjectCreatedId} already exists. ${err.message} Save again to finish its remaining values.`
+            : err.message;
+          if (this.addProjectCreatedId) await this.fetchTable();
+        }
       } finally {
         this.isProcessing = false;
         this.processingMessage = '';
       }
     },
     async submitUpdateForm() {
+      if (!this.isEditor || this.isProcessing || this.isPageLoading) return;
+      this.formError = '';
+      let payload;
+      try {
+        const sites = Array.isArray(this.updateForm.sitesArray) ? this.updateForm.sitesArray.join(', ') : '';
+        payload = this.addActualDateChanges(this.buildProjectPayload({ ...this.updateForm, sites }), this.updateForm);
+      } catch (err) { this.formError = err.message; return; }
       this.isProcessing = true;
       this.processingMessage = 'Updating Project Data...';
-      
-      this.updateForm.sites = Array.isArray(this.updateForm.sitesArray) ? this.updateForm.sitesArray.join(', ') : '';
-
       try {
         const response = await this.apiFetch(
-          `${process.env.VUE_APP_API_URL}/api/manager-yearly/${this.updateForm.projectId}`,
+          `${this.apiBaseUrl}/api/manager-yearly/${encodeURIComponent(payload.projectId)}`,
           {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(this.updateForm)
+            body: JSON.stringify(payload)
           }
         );
-        if (!response.ok) throw new Error('Failed to update project data.');
-
+        await this.readApiJson(response, 'Failed to update project data.');
         this.closeForm();
         await this.fetchTable();
       } catch (err) {
-        alert(err.message);
+        if (!err.isUnauthorized) this.formError = err.message;
       } finally {
         this.isProcessing = false;
         this.processingMessage = '';
@@ -2976,7 +3460,7 @@ export default {
 /* Executive Cards CSS */
 .executive-cards-section {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 16px;
 }
 .metric-card {
@@ -3023,6 +3507,7 @@ export default {
 .bg-g1 { background: linear-gradient(135deg, #0A2D55, #124076); } 
 .bg-g2 { background: linear-gradient(135deg, #4A235A, #6C3483); } 
 .bg-g3 { background: linear-gradient(135deg, #312E81, #4F46E5); }
+.bg-operationalised { background: linear-gradient(135deg, #065F46, #059669); }
 
 /* Summary Tables CSS */
 .summary-tables-section {
@@ -3274,6 +3759,41 @@ export default {
 }
 
 /* Modals */
+.project-data-error,
+.project-fields-notice {
+  padding: 12px 16px;
+  margin: 12px 0;
+  border: 1px solid;
+  border-radius: 6px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.project-data-error {
+  color: #842029;
+  background: #fff1f2;
+  border-color: #f1b8bd;
+}
+.project-fields-notice {
+  color: #664d03;
+  background: #fff8e1;
+  border-color: #e9d58d;
+}
+.project-field-help {
+  display: block;
+  color: #5b6776;
+  margin: 6px 0;
+  line-height: 1.4;
+  font-size: 0.85rem;
+}
+.editable-cell.readonly-cell,
+.editable-cell.readonly-cell:hover {
+  cursor: default;
+  background: transparent;
+}
+.milestone-actual-value {
+  padding: 8px;
+  color: #1f5fa8;
+}
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -3618,6 +4138,9 @@ export default {
 
 /* Responsive Enhancements */
 @media (max-width: 1400px) {
+  .executive-cards-section {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
   .piecharts-section {
     grid-template-columns: repeat(2, 1fr);
   }
