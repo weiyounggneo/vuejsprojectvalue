@@ -31,7 +31,7 @@ The application combines **Manager Yearly Tracking**, **Portfolio Overview**, **
 - [19. Verification and acceptance testing](#19-verification-and-acceptance-testing)
 - [20. Troubleshooting](#20-troubleshooting)
 - [21. Extension and maintenance guidelines](#21-extension-and-maintenance-guidelines)
-- [22. Known boundaries and documentation sources](#22-known-boundaries-and-documentation-sources)
+
 
 ## 1. Application capabilities
 
@@ -991,17 +991,4 @@ URL fields must remain validated at backend and frontend boundaries. Safe metada
 Keep shared hidden fields, personal grid preferences and widget visibility separate. Preserve required identifiers and yearly values under the shared policy. Never use a display preference as a substitute for server-side data access.
 
 Keep global control definitions separate from selected values. Changing preview scope, opening an inspector tab or expanding help/summary details must not add a layout save field or Undo step.
-
-## 22. Known boundaries and documentation sources
-
-- The complete router, package manifests/lockfiles, original core DDL and production proxy/process configuration are outside the inspected feature bundles. Verify them in the actual repository/deployment.
-- `trace.js` is required by the manager server but its operational logging policy is not established by these modules alone.
-- The 14 October Word reference predates the dynamic global-filter/Site catalogue, guided metrics, drill-down and chart-summary enhancements. Use current source for those contracts.
-- Only Site-level targets are available; project-category target allocation is not implemented.
-- Custom/current KPI fields and project counts do not gain historical meaning from a Year axis.
-- Core project writes do not have the layout service's revision conflict protocol.
-- Undo/Redo is an editor-session feature. Automatic recovery of an unsaved layout after a browser reload is not implemented in the inspected code.
-- A tutorial/help tour was discussed but is not part of the implemented What this shows summary.
-- Shared hiding does not protect confidential fields; no Site-level manager row-access policy is implemented.
-- The Project Value frontend depends on additional services whose database structures and security guarantees must be documented from their own implementation.
 
