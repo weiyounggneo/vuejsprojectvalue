@@ -1,0 +1,11 @@
+
+.visibility-settings { padding: 20px; background: #fff; border: 1px solid #dce4ee; border-radius: 8px; }
+.visibility-toolbar, .visibility-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.visibility-toolbar input { flex: 1; min-width: 220px; padding: 10px; border: 1px solid #c2d5ee; border-radius: 5px; }
+.visibility-group { margin: 22px 0; }
+.visibility-group h3 { color: #07254a; margin: 0 0 12px; font-size: 1rem; }
+.visibility-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.visibility-option { display: flex; align-items: center; gap: 9px; padding: 10px; background: #f4f7fb; border-radius: 5px; cursor: pointer; }
+.visibility-option input { width: auto; margin: 0; }
+.visibility-option small { display: block; color: #687b91; font-size: .75rem; }
+.visibility-actions { border-top: 1px solid #dce4ee; padding-top: 16px; margin-top: 16px; }

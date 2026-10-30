@@ -1,0 +1,64 @@
+/* Tables Section */
+.table-section {
+  padding: 0 20px;
+}
+
+.no-data-message {
+  text-align: center;
+  color: #666;
+  font-size: 1.1rem;
+  padding: 30px;
+  background-color: #fff;
+  border-radius: 8px;
+  border: 1px solid #e0e6ed;
+}
+
+/* Inline Edit Tooltips and CSS */
+.editable-cell {
+  cursor: pointer;
+  border: 1px dashed transparent;
+  border-radius: 4px;
+  transition: all 0.2s ease-in-out;
+  display: inline-block;
+  min-width: 100px;
+  min-height: 25px;
+  padding: 4px;
+  box-sizing: border-box;
+}
+
+.editable-cell:hover {
+  border-color: #1f5fa8;
+  background-color: #f0f4f8;
+}
+
+.inline-input {
+  display: block;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 2px solid #1f5fa8;
+  border-radius: 4px;
+  outline: none;
+  font-family: inherit;
+  font-size: inherit;
+  background-color: #fff;
+  box-shadow: 0 0 5px rgba(31, 95, 168, 0.2);
+}
+
+/* Role Badges */
+.status-badge {
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: bold;
+  display: inline-block;
+}
+.role-pending { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+.role-viewer { background-color: #e2e3e5; color: #383d41; border: 1px solid #d6d8db; }
+.role-user { background-color: #cce5ff; color: #004085; border: 1px solid #b8daff; }
+.role-admin { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+
+
+/* Vue Good Table Overrides */
+:deep(.vgt-table th) { white-space: nowrap; font-size: 0.9rem; background-color: #f8f9fb; }
+:deep(.vgt-table td) { font-size: 0.95rem; }

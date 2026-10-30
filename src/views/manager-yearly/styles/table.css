@@ -1,0 +1,70 @@
+/* Table Elements */
+.horizontal-scroll-wrapper {
+  overflow-x: auto;
+  border: 1px solid #e0e6ed;
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+/* ========================================================== */
+/* NEW: CSS for expanding Inline Editable Cells completely    */
+/* ========================================================== */
+
+.inline-edit-hint {
+  background-color: #e7edf5;
+  color: #1f5fa8;
+  padding: 10px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 0.95rem;
+  border: 1px solid #c2d5ee;
+}
+
+.editable-cell {
+  cursor: pointer;
+  border: 1px dashed transparent;
+  border-radius: 4px;
+  transition: all 0.2s ease-in-out;
+  display: flex;            /* Makes the hit box block-level */
+  align-items: center;      /* Keeps the text vertically centered */
+  width: 100%;              /* Forces the hit box to stretch */
+  min-width: 50px;
+  min-height: 30px;         /* Expands the physical clickable height */
+  padding: 2px 6px;         /* Adds a comfortable padding inside the box */
+  box-sizing: border-box;
+}
+
+.editable-cell:hover {
+  border-color: #1f5fa8;
+  background-color: #f0f4f8;
+}
+
+.inline-input {
+  display: block;
+  width: 100% !important;   /* Forces the input to overwrite everything and stretch */
+  min-height: 32px;
+  padding: 6px 8px;         /* Thicker padding for a better input experience */
+  border: 2px solid #1f5fa8; /* Visually pops when active */
+  border-radius: 4px;
+  outline: none;
+  font-family: inherit;
+  font-size: inherit;
+  box-sizing: border-box;
+  background-color: #fff;
+  box-shadow: 0 0 5px rgba(31, 95, 168, 0.2);
+}
+
+/* Vue Good Table Overrides */
+:deep(.vgt-table th) {
+  white-space: nowrap;
+  font-size: 0.85rem;
+  background-color: #f8f9fb;
+}
+:deep(.vgt-table td) {
+  white-space: nowrap;
+  font-size: 0.9rem;
+}
+:deep(.selected-row) {
+  background-color: #e0eaff !important;
+}

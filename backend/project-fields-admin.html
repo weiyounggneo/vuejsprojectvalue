@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project fields | BEM</title>
+  <style>
+    :root { font-family: system-ui, sans-serif; color: #182839; background: #f2f5f9; }
+    body { max-width: 1050px; margin: 36px auto; padding: 0 20px; }
+    h1 { font-size: 28px; margin-bottom: 8px; } h2 { font-size: 19px; }
+    .card { background: white; padding: 24px; border: 1px solid #dde4ec; border-radius: 12px; margin: 20px 0; }
+    label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; }
+    input, select, button { font: inherit; padding: 10px 12px; border-radius: 6px; border: 1px solid #bdcbd9; }
+    button { background: #174b80; color: white; cursor: pointer; margin-top: 16px; } button:disabled { opacity: .5; cursor: wait; }
+    button.secondary { background: white; color: #174b80; }
+    .muted { color: #53687a; font-size: 14px; } #status { min-height: 24px; white-space: pre-wrap; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; } th, td { text-align: left; padding: 12px 8px; border-bottom: 1px solid #e5ebf1; }
+    .scroll { overflow-x: auto; } [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <h1>Project fields</h1>
+  <p class="muted">Add project information such as an owner, review date, or budget. Each field creates a column in the project master table.</p>
+  <p id="status" role="status" aria-live="polite"></p>
+  <section class="card" id="loginSection">
+    <h2>Sign in</h2>
+    <form id="loginForm">
+      <div class="grid">
+        <label>Username<input name="username" autocomplete="username" required></label>
+        <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+      </div>
+      <button>Sign in</button>
+    </form>
+  </section>
+  <section class="card" id="createSection" hidden>
+    <h2>Add a column</h2>
+    <form id="createForm">
+      <div class="grid">
+        <label>Field label<input name="label" placeholder="Project owner" maxlength="120" required></label>
+        <label>Database column name<input name="columnName" placeholder="project_owner" pattern="[a-z][a-z0-9_]{0,63}" maxlength="64" required><span class="muted">Lowercase letters, digits, and underscores.</span></label>
+        <label>Type<select name="type"><option value="text">Text (up to 255 characters)</option><option value="number">Number (up to 4 decimal places)</option><option value="date">Date</option><option value="boolean">Yes / No</option></select></label>
+      </div>
+      <p class="muted">Existing projects start with an empty value. Column creation can take time; if interrupted, retry the same definition.</p>
+      <button>Add column</button>
+    </form>
+    <div class="scroll"><table><thead><tr><th>Field</th><th>Column</th><th>Type</th><th>Status</th></tr></thead><tbody id="fieldRows"></tbody></table></div>
+  </section>
+  <section class="card" id="editSection" hidden>
+    <h2>Edit project field values</h2>
+    <label>Project<select id="projectSelect"><option value="">Choose a project</option></select></label>
+    <form id="valuesForm" hidden><div id="valueInputs" class="grid" style="margin-top: 20px"></div><button>Save field values</button></form>
+    <p class="muted">This screen edits the added fields. Your existing project details remain available in the main app.</p>
+  </section>
+  <button id="logout" class="secondary" hidden>Sign out</button>
+<script>
+'use strict';
+let token = null, fields = [], projects = [];
+const $ = id => document.getElementById(id);
+function status(message, error = false) { $('status').textContent = message; $('status').style.color = error ? '#a12a30' : '#174b80'; }
+function resetSession() {
+  token = null; fields = []; projects = [];
+  $('loginSection').hidden = false;
+  for (const id of ['createSection', 'editSection', 'logout', 'valuesForm']) $(id).hidden = true;
+  $('fieldRows').replaceChildren(); $('valueInputs').replaceChildren(); $('projectSelect').replaceChildren();
+}
+async function api(url, options = {}) {
+  const headers = { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) };
+  const response = await fetch(url, { ...options, headers });
+  let data;
+  try { data = await response.json(); } catch { throw new Error('The server returned an invalid response.'); }
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) resetSession();
+    throw new Error(data.message || 'Request failed.');
+  }
+  return data;
+}
+function cell(value) { const td = document.createElement('td'); td.textContent = String(value ?? ''); return td; }
+async function refresh(admin) {
+  fields = await api('/api/manager-project-fields');
+  projects = await api('/api/manager-yearly');
+  const selected = $('projectSelect').value;
+  const initial = document.createElement('option'); initial.value = ''; initial.textContent = 'Choose a project';
+  $('projectSelect').replaceChildren(initial);
+  for (const project of projects) {
+    const option = document.createElement('option'); option.value = project.projectId; option.textContent = `${project.projectName} (${project.projectId})`;
+    $('projectSelect').append(option);
+  }
+  $('projectSelect').value = selected;
+  renderValues();
+  if (admin) {
+    const registry = await api('/api/admin/project-fields');
+    $('fieldRows').replaceChildren();
+    for (const field of registry) {
+      const tr = document.createElement('tr');
+      tr.append(cell(field.label), cell(field.columnName), cell(field.type), cell(field.state === 'ready' ? 'Ready' : 'Setup incomplete — retry this definition'));
+      $('fieldRows').append(tr);
+    }
+  }
+}
+function renderValues() {
+  $('valueInputs').replaceChildren();
+  const project = projects.find(row => row.projectId === $('projectSelect').value);
+  $('valuesForm').hidden = !project || !fields.length;
+  if (!project) return;
+  for (const field of fields) {
+    const label = document.createElement('label'); label.append(document.createTextNode(field.label));
+    let control;
+    if (field.type === 'boolean') {
+      control = document.createElement('select');
+      for (const [value, text] of [['', 'Empty'], ['true', 'Yes'], ['false', 'No']]) {
+        const option = document.createElement('option'); option.value = value; option.textContent = text; control.append(option);
+      }
+    } else {
+      control = document.createElement('input'); control.type = field.type === 'date' ? 'date' : field.type === 'number' ? 'number' : 'text';
+      if (field.type === 'number') control.step = '0.0001';
+      if (field.type === 'text') control.maxLength = 255;
+    }
+    control.name = field.columnName;
+    const value = project.customFields?.[field.columnName]; control.value = value == null ? '' : String(value);
+    label.append(control); $('valueInputs').append(label);
+  }
+}
+let admin = false;
+async function busy(form, action) {
+  const button = form.querySelector('button'); button.disabled = true;
+  try { await action(); } catch (err) { status(err.message, true); } finally { button.disabled = false; }
+}
+$('loginForm').addEventListener('submit', event => {
+  event.preventDefault(); busy(event.currentTarget, async () => {
+    const form = event.target;
+    const result = await api('/api/login', { method: 'POST', body: JSON.stringify({ username: form.elements.username.value, password: form.elements.password.value }) });
+    form.elements.password.value = '';
+    if (!['user', 'admin'].includes(result.access_right)) throw new Error('Editing requires a user or admin account.');
+    token = result.token; admin = result.access_right === 'admin';
+    await refresh(admin);
+    $('loginSection').hidden = true; $('createSection').hidden = !admin; $('editSection').hidden = false; $('logout').hidden = false;
+    status(admin ? 'Signed in. You can add columns and edit their values.' : 'Signed in. You can edit values for existing custom fields.');
+  });
+});
+$('createForm').addEventListener('submit', event => {
+  event.preventDefault(); busy(event.currentTarget, async () => {
+    const form = event.target;
+    const result = await api('/api/admin/project-fields', { method: 'POST', body: JSON.stringify({ label: form.elements.label.value, columnName: form.elements.columnName.value, type: form.elements.type.value }) });
+    await refresh(true); form.reset(); status(result.message);
+  });
+});
+$('projectSelect').addEventListener('change', renderValues);
+$('valuesForm').addEventListener('submit', event => {
+  event.preventDefault(); busy(event.currentTarget, async () => {
+    const customFields = Object.fromEntries(fields.map(field => {
+      const value = event.target.elements.namedItem(field.columnName).value;
+      return [field.columnName, value === '' ? null : field.type === 'boolean' ? value === 'true' : value];
+    }));
+    const result = await api('/api/manager-yearly/' + encodeURIComponent($('projectSelect').value) + '/custom-fields', { method: 'PATCH', body: JSON.stringify({ customFields }) });
+    await refresh(admin); status(result.message);
+  });
+});
+$('logout').addEventListener('click', () => { resetSession(); status('Signed out.'); });
+</script>
+</body>
+</html>

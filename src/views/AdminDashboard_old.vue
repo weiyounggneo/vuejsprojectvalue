@@ -1,0 +1,1774 @@
+<template>
+  <div class="table-gui-page">
+    <!-- Loading Overlay -->
+    <div v-if="isPageLoading" class="loading-overlay">
+      <div class="loading-box">
+        <div class="spinner"></div>
+        <div class="loading-text">Loading data, please wait...</div>
+      </div>
+    </div>
+
+    <!-- Processing Overlay -->
+    <div v-if="isProcessing && !isPageLoading" class="loading-overlay">
+      <div class="loading-box">
+        <div class="loading-text">{{ processingMessage || 'Processing, please wait...' }}</div>
+        <div class="loading-subtext">Please do not refresh or close the page.</div>
+        <div class="loading-bar-wrapper">
+          <div class="loading-bar-indeterminate"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Top Bar -->
+    <header class="top-bar">
+      <div class="left">
+        <img src="@/assets/st-logo.png" alt="ST Logo" class="logo" />
+        <span class="title">
+          Project Value Calculation:<br />
+          System Administration
+        </span>
+      </div>
+
+      <div class="topbar-actions">
+        <button class="back-btn" @click="goBack" :disabled="isProcessing || isPageLoading">Back</button>
+        <button class="home-btn" @click="goHome" :disabled="isProcessing || isPageLoading">Home</button>
+        <button class="logout-btn" @click="logout" :disabled="isProcessing || isPageLoading">Logout</button>
+      </div>
+    </header>
+
+    <div class="banner">System Administration & Access Control</div>
+
+    <!-- NAVIGATION TABS -->
+    <div class="tabs-container">
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'users' }"
+        @click="activeTab = 'users'"
+        :disabled="isProcessing || isPageLoading"
+      >
+        User Access Management
+      </button>
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'config' }"
+        @click="activeTab = 'config'"
+        :disabled="isProcessing || isPageLoading"
+      >
+        Master Data Configuration
+      </button>
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'targets' }"
+        @click="activeTab = 'targets'"
+        :disabled="isProcessing || isPageLoading"
+      >
+        Site Targets
+      </button>
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'columns' }"
+        @click="activeTab = 'columns'"
+        :disabled="isProcessing || isPageLoading"
+      >
+        Project Columns
+      </button>
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'visibility' }"
+        @click="openColumnVisibilityTab"
+        :disabled="isProcessing || isPageLoading"
+      >
+        Column Visibility
+      </button>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 1: USER MANAGEMENT                     -->
+    <!-- ========================================== -->
+    <div v-show="activeTab === 'users'" class="table-section" style="padding-top: 20px;">
+      
+      <div class="config-controls">
+        <div class="form-group">
+          <p style="margin: 0; color: #07254a; font-size: 0.95rem;">
+            💡 <strong>Tip:</strong> Double-click a user's 'Access Right' below to instantly change it, or add a new user proactively.
+          </p>
+        </div>
+        <button class="primary-btn" @click="openAddUserModal" :disabled="isProcessing">
+          + Add New User
+        </button>
+      </div>
+
+      <vue-good-table
+        :columns="userColumns"
+        :rows="users"
+        :pagination-options="{ enabled: true, perPage: 10 }"
+        :search-options="{ enabled: true, placeholder: 'Search users...' }"
+        :line-numbers="true"
+      >
+        <template #table-row="props">
+          <span v-if="props.column.field === 'access_right'">
+            <!-- Editing Mode -->
+            <span v-if="editingCell.rowId === props.row.username && editingCell.field === 'access_right'">
+              <select
+                v-model="editValue"
+                @blur="saveUserRole(props.row)"
+                @keyup.enter="saveUserRole(props.row)"
+                @keyup.esc="cancelInlineEdit"
+                v-focus
+                class="inline-input"
+              >
+                <option v-for="role in availableRoles" :key="role" :value="role">{{ role }}</option>
+              </select>
+            </span>
+            
+            <!-- Viewing Mode -->
+            <span 
+              v-else 
+              @dblclick.stop="startInlineEdit(props.row.username, 'access_right', props.row.access_right)" 
+              class="editable-cell"
+              title="Double-click to edit role"
+            >
+              <span class="status-badge" :class="'role-' + props.row.access_right">
+                {{ props.row.access_right.toUpperCase() }}
+              </span>
+            </span>
+          </span>
+
+          <span v-else-if="props.column.field === 'updated_at'">
+            {{ formatDate(props.row.updated_at) }}
+          </span>
+
+          <span v-else>
+            {{ props.formattedRow[props.column.field] }}
+          </span>
+        </template>
+
+        <template #emptystate>
+          <div class="no-data-message">No users found in the system.</div>
+        </template>
+      </vue-good-table>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 2: SYSTEM CONFIGURATION                -->
+    <!-- ========================================== -->
+    <div v-show="activeTab === 'config'" class="table-section" style="padding-top: 20px;">
+      
+      <div class="config-controls">
+        <div class="form-group" style="max-width: 300px;">
+          <label for="categorySelect">Select Master Data Category:</label>
+          <select id="categorySelect" v-model="selectedCategory" class="category-select" :disabled="availableCategories.length === 0">
+            <option v-if="availableCategories.length === 0" value="">-- No Categories Exist --</option>
+            <option v-for="cat in availableCategories" :key="cat" :value="cat">
+              {{ formatCategoryName(cat) }}
+            </option>
+          </select>
+        </div>
+        
+        <button class="primary-btn" @click="openAddConfigModal" :disabled="isProcessing">
+          + Add New Option
+        </button>
+      </div>
+
+      <div class="config-grid">
+        <div v-if="availableCategories.length === 0" class="no-data-message" style="margin-top: 20px;">
+          No master data categories found in the database. Click "+ Add New Option" to create your first category.
+        </div>
+
+        <vue-good-table
+          v-else
+          :columns="configColumns"
+          :rows="filteredConfigOptions"
+          :pagination-options="{ enabled: true, perPage: 10 }"
+          :line-numbers="true"
+        >
+          <template #emptystate>
+            <div class="no-data-message">No options exist for {{ formatCategoryName(selectedCategory) }}. Add one above.</div>
+          </template>
+        </vue-good-table>
+      </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 3: SITE TARGETS                        -->
+    <!-- ========================================== -->
+    <div v-show="activeTab === 'targets'" class="table-section" style="padding-top: 20px;">
+      
+      <div class="config-controls">
+        <div class="form-group">
+          <p style="margin: 0; color: #07254a; font-size: 0.95rem;">
+            💡 <strong>Tip:</strong> Double-click any 'Expected Value' below to update it directly, or add a new target. 
+          </p>
+        </div>
+        <button class="primary-btn" @click="openAddTargetModal" :disabled="isProcessing">
+          + Add Site Target
+        </button>
+      </div>
+
+      <vue-good-table
+        :columns="targetColumns"
+        :rows="siteTargets"
+        :pagination-options="{ enabled: true, perPage: 10 }"
+        :search-options="{ enabled: true, placeholder: 'Search by site or year...' }"
+        :line-numbers="true"
+      >
+        <template #table-row="props">
+          <span v-if="props.column.field === 'expected_value'">
+            <!-- Editing Mode -->
+            <span v-if="editingCell.rowId === `${props.row.site}_${props.row.target_year}` && editingCell.field === 'expected_value'">
+              <input
+                type="number"
+                v-model="editValue"
+                @blur="saveSiteTarget(props.row)"
+                @keyup.enter="saveSiteTarget(props.row)"
+                @keyup.esc="cancelInlineEdit"
+                v-focus
+                class="inline-input"
+              />
+            </span>
+            <!-- Viewing Mode -->
+            <span 
+              v-else 
+              @dblclick.stop="startInlineEdit(`${props.row.site}_${props.row.target_year}`, 'expected_value', props.row.expected_value)" 
+              class="editable-cell"
+              title="Double-click to edit value"
+            >
+              {{ formatCurrency(props.row.expected_value) }}
+            </span>
+          </span>
+          <span v-else>
+            {{ props.formattedRow[props.column.field] }}
+          </span>
+        </template>
+
+        <template #emptystate>
+          <div class="no-data-message">No site targets found in the database.</div>
+        </template>
+      </vue-good-table>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 4: PROJECT COLUMN MANAGEMENT           -->
+    <!-- ========================================== -->
+    <div v-show="activeTab === 'columns'" class="table-section project-columns-section">
+      <div class="config-controls project-column-controls">
+        <div class="project-column-intro">
+          <h2>Project Columns</h2>
+          <p>Add information such as a project owner, review date, or budget.</p>
+          <p class="field-help">New columns are optional. Text columns can accept free text or choices from Master Data Configuration.</p>
+        </div>
+        <div class="column-control-actions">
+          <button
+            type="button"
+            class="secondary-btn"
+            @click="fetchProjectColumns"
+            :disabled="isProcessing || isPageLoading || isProjectColumnsLoading"
+          >
+            {{ isProjectColumnsLoading ? 'Refreshing...' : 'Refresh' }}
+          </button>
+          <button
+            type="button"
+            class="primary-btn"
+            @click="openAddProjectColumnModal"
+            :disabled="isProcessing || isPageLoading || isProjectColumnsLoading || !!projectColumnsError"
+          >
+            + Add Project Column
+          </button>
+        </div>
+      </div>
+
+      <div v-if="projectColumnsError" class="column-error-panel" role="alert">
+        <strong>Could not load project columns.</strong>
+        <p>{{ projectColumnsError }}</p>
+        <button
+          type="button"
+          class="secondary-btn"
+          @click="fetchProjectColumns"
+          :disabled="isProcessing || isProjectColumnsLoading"
+        >
+          {{ isProjectColumnsLoading ? 'Retrying...' : 'Try Again' }}
+        </button>
+      </div>
+
+      <div v-else-if="isProjectColumnsLoading" class="column-loading" role="status" aria-live="polite">
+        Loading project columns...
+      </div>
+
+      <div v-else class="project-columns-table">
+        <vue-good-table
+          :columns="projectColumnTableColumns"
+          :rows="projectColumns"
+          :pagination-options="{ enabled: true, perPage: 10 }"
+          :search-options="{ enabled: true, placeholder: 'Search project columns...' }"
+          :line-numbers="true"
+        >
+          <template #table-row="props">
+            <span v-if="props.column.field === 'type'">
+              {{ formatProjectColumnType(props.row.type) }}
+            </span>
+            <span v-else-if="props.column.field === 'inputMode'">
+              {{ props.row.inputMode === 'dropdown' ? 'Dropdown' : props.row.type === 'text' ? 'Free text' : 'Typed input' }}
+            </span>
+            <span v-else-if="props.column.field === 'configCategory'">
+              {{ props.row.configCategory ? formatCategoryName(props.row.configCategory) : '—' }}
+            </span>
+            <span v-else-if="props.column.field === 'state'" class="column-state-cell">
+              <span
+                class="status-badge"
+                :class="props.row.state === 'ready' ? 'column-ready' : 'column-pending'"
+              >
+                {{ props.row.state === 'ready' ? 'Ready' : 'Setup incomplete' }}
+              </span>
+              <small v-if="props.row.lastError" class="column-setup-error">
+                {{ props.row.lastError }}
+              </small>
+            </span>
+            <span v-else-if="props.column.field === 'createdAt'">
+              {{ formatDate(props.row.createdAt) }}
+            </span>
+            <span v-else-if="props.column.field === 'actions'">
+              <button
+                v-if="props.row.state === 'creating'"
+                type="button"
+                class="secondary-btn retry-column-btn"
+                @click="openRetryProjectColumnModal(props.row)"
+                :disabled="isProcessing || isPageLoading || isProjectColumnsLoading"
+              >
+                Retry setup
+              </button>
+              <span v-else-if="props.row.state === 'ready'" class="column-control-actions">
+                <button type="button" class="secondary-btn" @click="openEditProjectColumnModal(props.row)" :disabled="isProcessing || isPageLoading">Edit settings</button>
+                <button v-if="props.row.inputMode === 'dropdown'" type="button" class="secondary-btn" @click="manageProjectColumnOptions(props.row)" :disabled="isProcessing || isPageLoading">Manage options</button>
+              </span>
+            </span>
+            <span v-else>{{ props.formattedRow[props.column.field] }}</span>
+          </template>
+          <template #emptystate>
+            <div class="no-data-message">No project columns have been added yet. Use "Add Project Column" to create the first one.</div>
+          </template>
+        </vue-good-table>
+        <p class="field-help column-table-note">
+          Use Edit settings to change a label or switch a text column between free text and a dropdown. Manage options opens its linked Master Data category.
+        </p>
+      </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 5: SHARED COLUMN VISIBILITY             -->
+    <!-- ========================================== -->
+    <div v-show="activeTab === 'visibility'" class="table-section project-columns-section">
+      <div class="config-controls project-column-controls">
+        <div class="project-column-intro">
+          <h2>Column Visibility</h2>
+          <p>Choose the columns shown in the data entry grid and Add / Update forms for everyone.</p>
+          <p class="field-help">Uncheck a column to hide it. Its saved values are kept. Project ID, Project Name and yearly savings are always available in the forms.</p>
+        </div>
+        <button type="button" class="secondary-btn" @click="fetchColumnVisibility" :disabled="isProcessing || isColumnVisibilityLoading">
+          {{ isColumnVisibilityLoading ? 'Refreshing...' : 'Refresh' }}
+        </button>
+      </div>
+      <div v-if="columnVisibilityError" class="column-error-panel" role="alert">
+        <strong>Could not load or save column visibility.</strong>
+        <p>{{ columnVisibilityError }}</p>
+        <button type="button" class="secondary-btn" @click="fetchColumnVisibility" :disabled="isProcessing || isColumnVisibilityLoading">Try Again</button>
+      </div>
+      <div v-if="isColumnVisibilityLoading" class="column-loading" role="status">Loading column visibility...</div>
+      <div v-if="columnVisibilityLoaded && !isColumnVisibilityLoading" class="visibility-settings">
+        <div class="visibility-toolbar">
+          <input id="visibility-search" type="search" v-model="visibilitySearch" placeholder="Search columns..." aria-label="Search columns" :disabled="isProcessing" />
+          <button type="button" class="secondary-btn" @click="setAllColumnsVisible(true)" :disabled="isProcessing">Show all optional columns</button>
+          <button type="button" class="secondary-btn" @click="setAllColumnsVisible(false)" :disabled="isProcessing">Hide all optional columns</button>
+        </div>
+        <section v-for="group in visibilityGroups" :key="group.name" class="visibility-group">
+          <h3>{{ group.name }}</h3>
+          <div class="visibility-options">
+            <label v-for="column in group.columns" :key="column.field" class="visibility-option">
+              <input type="checkbox" v-model="column.visible" :disabled="column.required || isProcessing" />
+              <span>{{ column.label }}<small v-if="column.required">Required</small></span>
+            </label>
+          </div>
+        </section>
+        <p v-if="!visibilityGroups.length" class="field-help">No columns match your search.</p>
+        <p class="field-help">Grid view presets can hide additional columns. Columns hidden here stay hidden in every grid view.</p>
+        <p v-if="columnVisibilityUpdatedBy" class="field-help">Last saved by {{ columnVisibilityUpdatedBy }}<span v-if="columnVisibilityUpdatedAt"> on {{ formatDate(columnVisibilityUpdatedAt) }}</span>.</p>
+        <div class="visibility-actions">
+          <button type="button" class="primary-btn" @click="saveColumnVisibility" :disabled="isProcessing || !columnVisibilityDirty">{{ isProcessing ? 'Saving...' : 'Save Visibility' }}</button>
+          <button type="button" class="secondary-btn" @click="discardColumnVisibilityChanges" :disabled="isProcessing || !columnVisibilityDirty">Discard Changes</button>
+          <span v-if="columnVisibilityDirty" class="field-help">You have unsaved changes.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- MODALS & DIALOGS                           -->
+    <!-- ========================================== -->
+
+    <!-- Add User Modal -->
+    <div v-if="showAddUserModal" class="modal-overlay">
+      <div class="modal">
+        <h3>Add New User</h3>
+        <form @submit.prevent="submitAddUser">
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label for="new_username">Username (LDAP ID)</label>
+            <input
+              id="new_username"
+              v-model="addUserForm.username"
+              :disabled="isProcessing"
+              placeholder="e.g. youngneo"
+              v-focus
+              required
+            />
+          </div>
+          
+          <div class="form-group" style="margin-bottom: 24px;">
+            <label for="new_role">Access Right</label>
+            <select id="new_role" v-model="addUserForm.access_right" :disabled="isProcessing" required>
+              <option v-for="role in availableRoles" :key="role" :value="role">{{ role.toUpperCase() }}</option>
+            </select>
+          </div>
+
+          <div class="modal-actions">
+            <button type="submit" class="actions formButton" :disabled="isProcessing">
+              {{ isProcessing ? 'Adding...' : 'Add User' }}
+            </button>
+            <button type="button" class="actions cancel" @click="showAddUserModal = false" :disabled="isProcessing">
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Add Config Modal -->
+    <div v-if="showAddConfigModal" class="modal-overlay">
+      <div class="modal">
+        <h3>Add New Configuration</h3>
+        <form @submit.prevent="submitAddConfig">
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" v-model="isAddingNewCategory" :disabled="isProcessing" style="width: auto; margin: 0;" />
+              <strong>Create a new category</strong>
+            </label>
+          </div>
+
+          <div v-if="isAddingNewCategory" class="form-group" style="margin-bottom: 16px;">
+            <label for="new_category_name">New Category Name</label>
+            <input
+              id="new_category_name"
+              v-model="addConfigForm.newCategory"
+              :disabled="isProcessing"
+              placeholder="e.g. DEPARTMENT or REGION"
+              required
+            />
+          </div>
+          <div v-else class="form-group" style="margin-bottom: 16px;">
+            <label>Target Category</label>
+            <input 
+              :value="availableCategories.length === 0 ? '-- No category selected --' : formatCategoryName(selectedCategory)" 
+              disabled 
+              style="background-color: #e9ecef; cursor: not-allowed; color: #495057; font-weight: bold;" 
+            />
+          </div>
+
+          <div class="form-group" style="margin-bottom: 24px;">
+            <label for="new_config_value">New Value</label>
+            <input
+              id="new_config_value"
+              v-model="addConfigForm.value"
+              :disabled="isProcessing"
+              placeholder="Enter new master data value..."
+              v-focus
+              required
+            />
+          </div>
+
+          <div class="modal-actions">
+            <button type="submit" class="actions formButton" :disabled="isProcessing">
+              {{ isProcessing ? 'Adding...' : 'Add Option' }}
+            </button>
+            <button type="button" class="actions cancel" @click="showAddConfigModal = false" :disabled="isProcessing">
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- NEW: Add Site Target Modal -->
+    <div v-if="showAddTargetModal" class="modal-overlay">
+      <div class="modal">
+        <h3>Add New Site Target</h3>
+        <form @submit.prevent="submitAddTarget">
+          
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label for="target_site">Site</label>
+            <!-- Dropdown if SITE config exists, otherwise text input -->
+            <select v-if="configMap.SITE && configMap.SITE.length > 0" id="target_site" v-model="addTargetForm.site" :disabled="isProcessing" required>
+              <option value="" disabled>Select a site...</option>
+              <option v-for="site in configMap.SITE" :key="site" :value="site">{{ site }}</option>
+            </select>
+            <input v-else id="target_site" v-model="addTargetForm.site" :disabled="isProcessing" placeholder="e.g. AMK" required />
+          </div>
+
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label for="target_year">Target Year</label>
+            <input
+              id="target_year"
+              type="number"
+              v-model="addTargetForm.target_year"
+              :disabled="isProcessing"
+              required
+            />
+          </div>
+
+          <div class="form-group" style="margin-bottom: 24px;">
+            <label for="expected_value">Expected Value ($)</label>
+            <input
+              id="expected_value"
+              type="number"
+              step="any"
+              v-model="addTargetForm.expected_value"
+              :disabled="isProcessing"
+              placeholder="e.g. 500000"
+              required
+            />
+          </div>
+
+          <div class="modal-actions">
+            <button type="submit" class="actions formButton" :disabled="isProcessing">
+              {{ isProcessing ? 'Saving...' : 'Save Target' }}
+            </button>
+            <button type="button" class="actions cancel" @click="showAddTargetModal = false" :disabled="isProcessing">
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Add / Retry Project Column Modal -->
+    <div v-if="showProjectColumnModal" class="modal-overlay">
+      <div class="modal project-column-modal" role="dialog" aria-modal="true" aria-labelledby="project-column-dialog-title">
+        <h3 id="project-column-dialog-title">{{ isEditingProjectColumn ? 'Edit Column Settings' : isRetryingProjectColumn ? 'Finish Column Setup' : 'Add Project Column' }}</h3>
+        <p class="field-help">
+          {{ isRetryingProjectColumn
+            ? 'Retry completes the original column definition. Its name, label, and type stay the same.'
+            : 'Choose a label and type for the information you want to store for each project.' }}
+        </p>
+        <form @submit.prevent="submitProjectColumn">
+          <div class="form-group column-form-group">
+            <label for="project_column_label">Display Label</label>
+            <input
+              id="project_column_label"
+              v-model="projectColumnForm.label"
+              @input="suggestProjectColumnName"
+              :disabled="isProcessing || isRetryingProjectColumn"
+              placeholder="e.g. Project Owner"
+              maxlength="120"
+              required
+              v-focus
+            />
+          </div>
+          <div class="form-group column-form-group">
+            <label for="project_column_name">Database Column Name</label>
+            <input
+              id="project_column_name"
+              v-model="projectColumnForm.columnName"
+              @input="projectColumnNameEdited = true"
+              :disabled="isProcessing || isRetryingProjectColumn || isEditingProjectColumn"
+              placeholder="e.g. project_owner"
+              pattern="[a-z][a-z0-9_]{0,63}"
+              maxlength="64"
+              aria-describedby="project-column-name-help"
+              required
+            />
+            <p id="project-column-name-help" class="field-help">Start with a lowercase letter. Use lowercase letters, digits, and underscores.</p>
+          </div>
+          <div class="form-group column-form-group">
+            <label for="project_column_type">Field Type</label>
+            <select
+              id="project_column_type"
+              v-model="projectColumnForm.type"
+              :disabled="isProcessing || isRetryingProjectColumn || isEditingProjectColumn"
+              aria-describedby="project-column-type-help"
+              required
+            >
+              <option v-for="type in projectColumnTypes" :key="type.value" :value="type.value">{{ type.label }}</option>
+            </select>
+            <p id="project-column-type-help" class="field-help">{{ selectedProjectColumnTypeDescription }}</p>
+          </div>
+          <template v-if="projectColumnForm.type === 'text'">
+            <div class="form-group column-form-group">
+              <label for="project_column_input_mode">How users enter a value</label>
+              <select id="project_column_input_mode" v-model="projectColumnForm.inputMode" :disabled="isProcessing || isRetryingProjectColumn">
+                <option value="free">Free text</option>
+                <option value="dropdown">Dropdown from Master Data</option>
+              </select>
+            </div>
+            <div v-if="projectColumnForm.inputMode === 'dropdown'" class="form-group column-form-group">
+              <label for="project_column_category">Master Data Category</label>
+              <select id="project_column_category" v-model="projectColumnForm.configCategory" :disabled="isProcessing || isRetryingProjectColumn || projectColumnNewCategory" :required="!projectColumnNewCategory">
+                <option value="" disabled>Select a category...</option>
+                <option v-for="category in availableCategories" :key="category" :value="category">{{ formatCategoryName(category) }}</option>
+                <option v-if="isRetryingProjectColumn && projectColumnForm.configCategory && !availableCategories.includes(projectColumnForm.configCategory)" :value="projectColumnForm.configCategory">{{ formatCategoryName(projectColumnForm.configCategory) }}</option>
+              </select>
+              <label v-if="!isRetryingProjectColumn" class="field-help">
+                <input type="checkbox" v-model="projectColumnNewCategory" :disabled="isProcessing" /> Create a new category instead
+              </label>
+              <input v-if="projectColumnNewCategory" v-model="projectColumnCategoryName" placeholder="e.g. PROJECT_PRIORITY" maxlength="64" :disabled="isProcessing" required />
+              <p class="field-help">Choices are managed in Master Data Configuration. A new category appears there after saving; add its options before filling project values.</p>
+              <p v-if="!projectColumnNewCategory" class="field-help">Current options: {{ (configMap[projectColumnForm.configCategory] || []).join(', ') || 'No options yet' }}</p>
+              <p v-if="isEditingProjectColumn" class="field-help">Before switching, add every existing project value to the selected category. Saved values are preserved.</p>
+            </div>
+          </template>
+          <div class="column-preview">
+            <strong>{{ projectColumnForm.label.trim() || 'New project field' }}</strong>
+            <span>{{ formatProjectColumnType(projectColumnForm.type) }} · Optional · Starts empty</span>
+          </div>
+          <p v-if="projectColumnFormError" class="column-form-error" role="alert">{{ projectColumnFormError }}</p>
+          <div class="modal-actions">
+            <button type="submit" class="actions formButton" :disabled="isProcessing">
+              {{ isProcessing ? 'Saving...' : isEditingProjectColumn ? 'Save Settings' : isRetryingProjectColumn ? 'Retry Setup' : 'Add Column' }}
+            </button>
+            <button type="button" class="actions cancel" @click="closeProjectColumnModal" :disabled="isProcessing">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Success Dialog -->
+    <div v-if="showSuccessDialog" class="modal-overlay">
+      <div class="confirmationmessage">
+        <h3>Successful!</h3>
+        <p>{{ successMessage }}</p>
+        <div class="modal-actions">
+          <button class="actions formButton" @click="showSuccessDialog = false" :disabled="isProcessing">OK</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</template>
+
+<script>
+import { VueGoodTable } from 'vue-good-table-next';
+import 'vue-good-table-next/dist/vue-good-table-next.css';
+
+export default {
+  name: 'AdminDashboard',
+  components: { VueGoodTable },
+  directives: {
+    focus: {
+      mounted(el) {
+        el.focus();
+      }
+    }
+  },
+  data() {
+    return {
+      activeTab: 'users',
+      isProcessing: false,
+      isPageLoading: false,
+      processingMessage: '',
+      
+      // Dialogs
+      showSuccessDialog: false,
+      successMessage: '',
+
+      // General Editing State
+      editingCell: { rowId: null, field: null },
+      editValue: null,
+
+      // User Management State
+      users: [],
+      availableRoles: ['pending', 'viewer', 'user', 'admin'],
+      showAddUserModal: false,
+      addUserForm: {
+        username: '',
+        access_right: 'viewer'
+      },
+      userColumns: [
+        { label: 'Username', field: 'username' },
+        { label: 'Access Right', field: 'access_right' },
+        { label: 'Last Granted By', field: 'granted_by' },
+        { label: 'Last Updated', field: 'updated_at' }
+      ],
+
+      // Configuration State
+      configMap: {}, 
+      availableCategories: [], 
+      selectedCategory: '',
+      showAddConfigModal: false,
+      isAddingNewCategory: false,
+      addConfigForm: {
+        newCategory: '',
+        value: ''
+      },
+      configColumns: [
+        { label: 'Active Options', field: 'value' }
+      ],
+
+      // Site Targets State
+      siteTargets: [],
+      showAddTargetModal: false,
+      addTargetForm: {
+        site: '',
+        target_year: new Date().getFullYear(),
+        expected_value: null
+      },
+      targetColumns: [
+        { label: 'Site', field: 'site', width: '200px' },
+        { label: 'Target Year', field: 'target_year', type: 'number', width: '150px' },
+        { label: 'Expected Value', field: 'expected_value', type: 'number', width: '200px' }
+      ],
+
+      // Added columns use the field-registry API from project-fields.js.
+      visibilityColumns: [],
+      visibilitySavedColumns: [],
+      visibilitySearch: '',
+      columnVisibilityRevision: 0,
+      columnVisibilityLoaded: false,
+      isColumnVisibilityLoading: false,
+      columnVisibilityError: '',
+      columnVisibilityUpdatedBy: '',
+      columnVisibilityUpdatedAt: '',
+      projectColumns: [],
+      isProjectColumnsLoading: false,
+      projectColumnsError: '',
+      showProjectColumnModal: false,
+      isRetryingProjectColumn: false,
+      isEditingProjectColumn: false,
+      projectColumnNewCategory: false,
+      projectColumnCategoryName: '',
+      projectColumnNameEdited: false,
+      projectColumnFormError: '',
+      projectColumnForm: { columnName: '', label: '', type: 'text', inputMode: 'free', configCategory: '' },
+      projectColumnTypes: [
+        { value: 'text', label: 'Text', description: 'Names or short descriptions, up to 255 characters.' },
+        { value: 'number', label: 'Number', description: 'A number with up to 14 integer digits and 4 decimal places.' },
+        { value: 'date', label: 'Date', description: 'A calendar date, such as a review or approval date.' },
+        { value: 'boolean', label: 'Yes / No', description: 'Yes, No, or an empty value.' }
+      ],
+      projectColumnTableColumns: [
+        { label: 'Display Label', field: 'label' },
+        { label: 'Column Name', field: 'columnName' },
+        { label: 'Field Type', field: 'type' },
+        { label: 'Input', field: 'inputMode' },
+        { label: 'Master Data Category', field: 'configCategory' },
+        { label: 'Status', field: 'state' },
+        { label: 'Added By', field: 'createdBy' },
+        { label: 'Added On', field: 'createdAt' },
+        { label: 'Actions', field: 'actions', sortable: false }
+      ]
+    };
+  },
+  computed: {
+    apiBaseUrl() {
+      return (process.env.VUE_APP_API_URL || '').trim().replace(/\/+$/, '');
+    },
+    isAdmin() {
+      return localStorage.getItem('access_right') === 'admin';
+    },
+    filteredConfigOptions() {
+      if (!this.selectedCategory) return [];
+      const options = this.configMap[this.selectedCategory] || [];
+      return options.map(opt => ({ value: opt }));
+    },
+    selectedProjectColumnTypeDescription() {
+      const type = this.projectColumnTypes.find(item => item.value === this.projectColumnForm.type);
+      return type ? type.description : '';
+    },
+    visibilityGroups() {
+      const query = this.visibilitySearch.trim().toLowerCase();
+      const groups = new Map();
+      this.visibilityColumns.forEach(column => {
+        if (query && !`${column.label} ${column.field} ${column.group}`.toLowerCase().includes(query)) return;
+        if (!groups.has(column.group)) groups.set(column.group, []);
+        groups.get(column.group).push(column);
+      });
+      return [...groups].map(([name, columns]) => ({ name, columns }));
+    },
+    columnVisibilityDirty() {
+      return this.columnVisibilityLoaded && this.visibilityColumns.some(column => column.visible !== this.visibilitySavedColumns.find(saved => saved.field === column.field)?.visible);
+    }
+  },
+  async mounted() {
+    const token = localStorage.getItem('token');
+    if (!token || !this.isAdmin) {
+      alert("Access Denied: Administrator privileges required.");
+      this.$router.push('/landing');
+      return;
+    }
+
+    this.isPageLoading = true;
+    try {
+      const response = await this.apiFetch(`${this.apiBaseUrl}/api/check-auth`);
+      if (!response.ok) throw new Error('Session expired');
+      
+      const authData = await response.json();
+      if (authData.user.access_right !== 'admin') {
+        throw new Error('Not an admin');
+      }
+      await Promise.allSettled([
+        this.fetchUsers(),
+        this.fetchConfigs(),
+        this.fetchSiteTargets(),
+        this.fetchProjectColumns(),
+        this.fetchColumnVisibility()
+      ]);
+    } catch {
+      localStorage.clear();
+      this.$router.push('/login');
+    } finally {
+      this.isPageLoading = false;
+    }
+  },
+  methods: {
+    // -------------------------------------------------
+    // SHARED COLUMN VISIBILITY
+    // -------------------------------------------------
+    async openColumnVisibilityTab() {
+      if (this.isProcessing || this.isPageLoading) return;
+      this.activeTab = 'visibility';
+      if (!this.columnVisibilityDirty) await this.fetchColumnVisibility();
+    },
+    async fetchColumnVisibility() {
+      if (this.isColumnVisibilityLoading) return false;
+      this.isColumnVisibilityLoading = true;
+      this.columnVisibilityError = '';
+      try {
+        const response = await this.apiFetch(`${this.apiBaseUrl}/api/admin/column-visibility`);
+        if (response.status === 404) throw new Error('The backend needs the column visibility update. Replace server.js and run 004_column_visibility.sql.');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data?.message || 'Failed to load column visibility.');
+        const seen = new Set();
+        if (!Array.isArray(data.columns) || !Array.isArray(data.hiddenFields) || !Number.isSafeInteger(data.revision) || data.revision < 0 || data.columns.some(column => {
+          if (!column || typeof column.field !== 'string' || !column.field || seen.has(column.field) || typeof column.label !== 'string' || typeof column.group !== 'string' || typeof column.visible !== 'boolean' || typeof column.required !== 'boolean') return true;
+          seen.add(column.field);
+          return false;
+        }) || !['projectId', 'projectName'].every(field => data.columns.some(column => column.field === field && column.required && column.visible))) throw new Error('The server returned invalid column visibility settings.');
+        // Ignore year options from older backends as well.
+        this.visibilityColumns = data.columns.filter(column => !/^year\d{4}$/.test(column.field)).map(column => ({ ...column }));
+        this.visibilitySavedColumns = this.visibilityColumns.map(column => ({ ...column }));
+        this.columnVisibilityRevision = data.revision;
+        this.columnVisibilityUpdatedBy = data.updatedBy || '';
+        this.columnVisibilityUpdatedAt = data.updatedAt || '';
+        this.columnVisibilityLoaded = true;
+        return true;
+      } catch (err) {
+        this.columnVisibilityError = err.message || 'Failed to load column visibility.';
+        return false;
+      } finally { this.isColumnVisibilityLoading = false; }
+    },
+    setAllColumnsVisible(visible) {
+      if (this.isProcessing || !this.columnVisibilityLoaded) return;
+      this.visibilityColumns.forEach(column => { column.visible = column.required || visible; });
+    },
+    discardColumnVisibilityChanges() {
+      if (this.isProcessing) return;
+      this.visibilityColumns = this.visibilitySavedColumns.map(column => ({ ...column }));
+    },
+    async saveColumnVisibility() {
+      if (!this.isAdmin || this.isProcessing || !this.columnVisibilityLoaded || this.isColumnVisibilityLoading || !this.columnVisibilityDirty) return;
+      this.isProcessing = true;
+      this.processingMessage = 'Saving column visibility for everyone...';
+      this.columnVisibilityError = '';
+      try {
+        const hiddenFields = this.visibilityColumns.filter(column => !column.required && !column.visible).map(column => column.field);
+        const response = await this.apiFetch(`${this.apiBaseUrl}/api/admin/column-visibility`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ hiddenFields, revision: this.columnVisibilityRevision })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data?.message || 'Failed to save column visibility.');
+        if (!Array.isArray(data.hiddenFields) || !Number.isSafeInteger(data.revision)) throw new Error('The save response was invalid. Refresh to check whether the settings were saved.');
+        const hidden = new Set(data.hiddenFields);
+        this.visibilityColumns.forEach(column => { column.visible = column.required || !hidden.has(column.field); });
+        this.visibilitySavedColumns = this.visibilityColumns.map(column => ({ ...column }));
+        this.columnVisibilityRevision = data.revision;
+        this.columnVisibilityUpdatedBy = data.updatedBy || '';
+        this.columnVisibilityUpdatedAt = data.updatedAt || '';
+        this.successMessage = 'Column visibility saved for everyone. Refresh Data & Columns on the tracking page to apply these settings.';
+        this.showSuccessDialog = true;
+      } catch (err) {
+        this.columnVisibilityError = err.message || 'Failed to save column visibility.';
+      } finally { this.isProcessing = false; this.processingMessage = ''; }
+    },
+    // -------------------------------------------------
+    // API UTILITY
+    // -------------------------------------------------
+    async apiFetch(url, options = {}) {
+      const token = localStorage.getItem('token');
+      if (!options.headers) options.headers = {};
+      options.headers['Authorization'] = `Bearer ${token}`;
+
+      const response = await fetch(url, options);
+
+      if (response.status === 401 || response.status === 403) {
+        alert('Session expired or unauthorized. Returning to login.');
+        localStorage.clear();
+        this.$router.push('/login');
+        const error = new Error('Unauthorized');
+        error.isUnauthorized = true;
+        throw error;
+      }
+      return response;
+    },
+
+    // -------------------------------------------------
+    // NAVIGATION
+    // -------------------------------------------------
+    goHome() {
+      if (this.isProcessing || this.isPageLoading) return;
+      this.$router.push('/landing');
+    },
+    goBack() {
+      if (this.isProcessing || this.isPageLoading) return;
+      this.$router.push('/landing');
+    },
+    logout() {
+      if (this.isProcessing || this.isPageLoading) return;
+      localStorage.clear();
+      this.$router.push('/login');
+    },
+
+    // -------------------------------------------------
+    // GENERAL INLINE EDITING LOGIC
+    // -------------------------------------------------
+    startInlineEdit(rowId, field, currentValue) {
+      if (this.isProcessing || this.isPageLoading) return;
+      this.editingCell = { rowId, field };
+      this.editValue = currentValue;
+    },
+    cancelInlineEdit() {
+      this.editingCell = { rowId: null, field: null };
+      this.editValue = null;
+    },
+    formatDate(val) {
+      if (!val) return '-';
+      const date = new Date(val);
+      return isNaN(date.getTime()) ? val : date.toLocaleString();
+    },
+    formatCurrency(value) {
+      if (value === null || value === undefined || value === '') return '';
+      return `$${Number(value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+    },
+
+    // -------------------------------------------------
+    // USER MANAGEMENT LOGIC
+    // -------------------------------------------------
+    async fetchUsers() {
+      try {
+        const res = await this.apiFetch(`${this.apiBaseUrl}/api/admin/users`);
+        if (!res.ok) throw new Error('Failed to fetch users');
+        this.users = await res.json();
+      } catch (err) {
+        console.error(err);
+      }
+    },
+
+    openAddUserModal() {
+      this.addUserForm.username = '';
+      this.addUserForm.access_right = 'viewer';
+      this.showAddUserModal = true;
+    },
+
+    async submitAddUser() {
+      const newUsername = this.addUserForm.username.trim();
+      if (!newUsername) return alert('Username cannot be empty.');
+
+      this.isProcessing = true;
+      this.processingMessage = `Adding ${newUsername}...`;
+      
+      try {
+        const res = await this.apiFetch(`${this.apiBaseUrl}/api/admin/users/${encodeURIComponent(newUsername)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ access_right: this.addUserForm.access_right })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.message || 'Failed to add user');
+        }
+
+        this.successMessage = `Successfully added ${newUsername} with ${this.addUserForm.access_right.toUpperCase()} access.`;
+        this.showAddUserModal = false;
+        this.showSuccessDialog = true;
+        await this.fetchUsers();
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        this.isProcessing = false;
+        this.processingMessage = '';
+      }
+    },
+
+    async saveUserRole(row) {
+      if (this.isProcessing) return;
+      const field = this.editingCell.field;
+      if (!field || field !== 'access_right') return;
+
+      const newRole = this.editValue;
+      if (newRole === row.access_right) {
+        this.cancelInlineEdit();
+        return;
+      }
+
+      this.isProcessing = true;
+      this.processingMessage = `Updating role for ${row.username}...`;
+      
+      try {
+        const res = await this.apiFetch(`${this.apiBaseUrl}/api/admin/users/${encodeURIComponent(row.username)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ access_right: newRole })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.message || 'Failed to update user role');
+        }
+
+        this.successMessage = `Successfully updated ${row.username} to ${newRole.toUpperCase()}.`;
+        this.showSuccessDialog = true;
+        await this.fetchUsers();
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        this.cancelInlineEdit();
+        this.isProcessing = false;
+        this.processingMessage = '';
+      }
+    },
+
+    // -------------------------------------------------
+    // SYSTEM CONFIGURATION LOGIC
+    // -------------------------------------------------
+    async fetchConfigs() {
+      try {
+        const res = await this.apiFetch(`${this.apiBaseUrl}/api/config/options`);
+        if (!res.ok) throw new Error('Failed to fetch configuration options');
+        this.configMap = await res.json();
+        
+        this.availableCategories = Object.keys(this.configMap).sort();
+        
+        if (this.availableCategories.length > 0) {
+          if (!this.selectedCategory || !this.availableCategories.includes(this.selectedCategory)) {
+            this.selectedCategory = this.availableCategories[0];
+          }
+        } else {
+          this.selectedCategory = '';
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    },
+
+    formatCategoryName(cat) {
+      if (!cat) return '';
+      return cat.replace(/_/g, ' ');
+    },
+
+    openAddConfigModal() {
+      this.addConfigForm.value = '';
+      this.addConfigForm.newCategory = '';
+      this.isAddingNewCategory = false; 
+      this.showAddConfigModal = true;
+    },
+
+    async submitAddConfig() {
+      if (!this.addConfigForm.value.trim()) {
+        return alert("Value cannot be blank.");
+      }
+
+      let categoryToUse = this.selectedCategory;
+
+      if (this.isAddingNewCategory) {
+        if (!this.addConfigForm.newCategory.trim()) {
+          return alert("New category name cannot be blank.");
+        }
+        categoryToUse = this.addConfigForm.newCategory.trim().toUpperCase().replace(/\s+/g, '_');
+      }
+
+      if (!categoryToUse) {
+        return alert("Please select or create a category before adding an option.");
+      }
+
+      this.isProcessing = true;
+      this.processingMessage = 'Adding new option...';
+
+      try {
+        const payload = {
+          category: categoryToUse,
+          value: this.addConfigForm.value.trim()
+        };
+
+        const res = await this.apiFetch(`${this.apiBaseUrl}/api/config/options`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.message || 'Failed to add option');
+        }
+
+        this.successMessage = `'${payload.value}' has been successfully added to ${this.formatCategoryName(categoryToUse)}.`;
+        this.showAddConfigModal = false;
+        this.showSuccessDialog = true;
+        
+        this.selectedCategory = categoryToUse;
+        await this.fetchConfigs();
+        await this.fetchProjectColumns();
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        this.isProcessing = false;
+        this.processingMessage = '';
+      }
+    },
+
+    // -------------------------------------------------
+    // SITE TARGETS LOGIC
+    // -------------------------------------------------
+    async fetchSiteTargets() {
+      try {
+        const res = await this.apiFetch(`${this.apiBaseUrl}/api/manager-site-targets`);
+        if (!res.ok) throw new Error('Failed to fetch site targets');
+        this.siteTargets = await res.json();
+      } catch (err) {
+        console.error("Site targets fetch error:", err);
+      }
+    },
+
+    openAddTargetModal() {
+      this.addTargetForm.site = '';
+      this.addTargetForm.target_year = new Date().getFullYear();
+      this.addTargetForm.expected_value = null;
+      this.showAddTargetModal = true;
+    },
+
+    async submitAddTarget() {
+      if (!this.addTargetForm.site || !this.addTargetForm.target_year || this.addTargetForm.expected_value === null) {
+        return alert("All fields are required.");
+      }
+
+      this.isProcessing = true;
+      this.processingMessage = 'Adding new site target...';
+
+      try {
+        const res = await this.apiFetch(`${this.apiBaseUrl}/api/manager-site-targets`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.addTargetForm)
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.message || 'Failed to add target');
+        }
+
+        this.successMessage = `Target for ${this.addTargetForm.site} (${this.addTargetForm.target_year}) successfully added.`;
+        this.showAddTargetModal = false;
+        this.showSuccessDialog = true;
+        
+        await this.fetchSiteTargets();
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        this.isProcessing = false;
+        this.processingMessage = '';
+      }
+    },
+
+    async saveSiteTarget(row) {
+      if (this.isProcessing) return;
+      const field = this.editingCell.field;
+      if (field !== 'expected_value') return;
+
+      const newValue = Number(this.editValue);
+      if (newValue === Number(row.expected_value)) {
+        this.cancelInlineEdit();
+        return;
+      }
+
+      this.isProcessing = true;
+      this.processingMessage = `Updating target for ${row.site}...`;
+      
+      try {
+        const res = await this.apiFetch(`${this.apiBaseUrl}/api/manager-site-targets`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            site: row.site,
+            target_year: row.target_year,
+            expected_value: newValue
+          })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.message || 'Failed to update target');
+        }
+
+        this.successMessage = `Successfully updated target for ${row.site} (${row.target_year}).`;
+        this.showSuccessDialog = true;
+        await this.fetchSiteTargets();
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        this.cancelInlineEdit();
+        this.isProcessing = false;
+        this.processingMessage = '';
+      }
+    },
+
+    // -------------------------------------------------
+    // PROJECT COLUMN MANAGEMENT
+    // -------------------------------------------------
+    formatProjectColumnType(value) {
+      const type = this.projectColumnTypes.find(item => item.value === value);
+      return type ? type.label : String(value || 'Unknown');
+    },
+
+    async projectColumnResponse(response, fallbackMessage) {
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        if (response.status === 404) {
+          throw new Error('Project column management is not enabled on the server yet.');
+        }
+        throw new Error(fallbackMessage);
+      }
+      if (!response.ok) {
+        throw new Error(response.status === 404
+          ? 'Project column management is not enabled on the server yet.'
+          : (data && data.message) || fallbackMessage);
+      }
+      if (!data || typeof data !== 'object') throw new Error('The server returned an unexpected project column response.');
+      return data;
+    },
+
+    async fetchProjectColumns() {
+      if (this.isProjectColumnsLoading) return false;
+      this.isProjectColumnsLoading = true;
+      this.projectColumnsError = '';
+      try {
+        const response = await this.apiFetch(`${this.apiBaseUrl}/api/admin/project-fields`);
+        const data = await this.projectColumnResponse(response, 'Failed to load project columns. Please retry.');
+        if (!Array.isArray(data)) throw new Error('The server returned an unexpected project column list.');
+        this.projectColumns = data;
+        return true;
+      } catch (err) {
+        this.projectColumnsError = err.message || 'Failed to load project columns. Please retry.';
+        return false;
+      } finally {
+        this.isProjectColumnsLoading = false;
+      }
+    },
+
+    openAddProjectColumnModal() {
+      if (this.isProcessing || this.isPageLoading || this.isProjectColumnsLoading || this.projectColumnsError) return;
+      this.cancelInlineEdit();
+      this.projectColumnForm = { columnName: '', label: '', type: 'text', inputMode: 'free', configCategory: '' };
+      this.isEditingProjectColumn = false;
+      this.projectColumnNewCategory = false;
+      this.projectColumnCategoryName = '';
+      void this.fetchConfigs();
+      this.projectColumnNameEdited = false;
+      this.isRetryingProjectColumn = false;
+      this.projectColumnFormError = '';
+      this.showProjectColumnModal = true;
+    },
+
+    openRetryProjectColumnModal(row) {
+      if (this.isProcessing || this.isPageLoading || this.isProjectColumnsLoading || row.state !== 'creating') return;
+      this.cancelInlineEdit();
+      this.projectColumnForm = { columnName: row.columnName, label: row.label, type: row.type, inputMode: row.inputMode || 'free', configCategory: row.configCategory || '' };
+      this.isEditingProjectColumn = false;
+      this.projectColumnNewCategory = false;
+      this.projectColumnCategoryName = '';
+      void this.fetchConfigs();
+      this.projectColumnNameEdited = true;
+      this.isRetryingProjectColumn = true;
+      this.projectColumnFormError = '';
+      this.showProjectColumnModal = true;
+    },
+
+    openEditProjectColumnModal(row) {
+      if (this.isProcessing || this.isPageLoading || row.state !== 'ready') return;
+      this.cancelInlineEdit();
+      this.projectColumnForm = { columnName: row.columnName, label: row.label, type: row.type, inputMode: row.inputMode || 'free', configCategory: row.configCategory || '' };
+      this.isEditingProjectColumn = true;
+      this.isRetryingProjectColumn = false;
+      this.projectColumnNameEdited = true;
+      this.projectColumnNewCategory = false;
+      this.projectColumnCategoryName = '';
+      this.projectColumnFormError = '';
+      this.showProjectColumnModal = true;
+      void this.fetchConfigs();
+    },
+
+    async manageProjectColumnOptions(row) {
+      await this.fetchConfigs();
+      this.selectedCategory = row.configCategory;
+      this.activeTab = 'config';
+    },
+
+    closeProjectColumnModal() {
+      if (this.isProcessing) return;
+      this.showProjectColumnModal = false;
+      this.projectColumnFormError = '';
+    },
+
+    suggestProjectColumnName() {
+      if (this.projectColumnNameEdited || this.isRetryingProjectColumn || this.isEditingProjectColumn) return;
+      let name = this.projectColumnForm.label.trim().toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+      if (name && !/^[a-z]/.test(name)) name = `field_${name}`;
+      this.projectColumnForm.columnName = name.slice(0, 64);
+    },
+
+    validateProjectColumn(payload) {
+      if (!payload.label || Array.from(payload.label).length > 120) return 'Display label must contain 1 to 120 characters.';
+      if (!/^[a-z][a-z0-9_]{0,63}$/.test(payload.columnName)) {
+        return 'Column name must start with a lowercase letter and contain only lowercase letters, digits, and underscores (maximum 64 characters).';
+      }
+      const reserved = [
+        'project_id', 'project_name', 'project_status', 'pillar', 'site',
+        'current_pmo_gate', 'dtit_involved', 'ai_type', 'foak_noak',
+        'target_g1_date', 'target_g2_date', 'target_g3_date', 'target_closed_date',
+        'constructor', 'prototype', '__proto__'
+      ];
+      if (reserved.includes(payload.columnName)) return 'This name is reserved for an existing project field. Choose another name.';
+      if (!this.projectColumnTypes.some(type => type.value === payload.type)) return 'Choose a supported field type.';
+      const existing = this.projectColumns.find(field => field.columnName === payload.columnName);
+      if (!['free', 'dropdown'].includes(payload.inputMode || 'free')) return 'Choose Free text or Dropdown.';
+      if (payload.inputMode === 'dropdown' && (payload.type !== 'text' || !payload.configCategory || Array.from(payload.configCategory).length > 64 || ['constructor', 'prototype', '__proto__'].includes(payload.configCategory))) return 'Choose a text column and a master data category of 1 to 64 characters.';
+      if (!this.isEditingProjectColumn && existing && (existing.label !== payload.label || existing.type !== payload.type || (existing.inputMode || 'free') !== (payload.inputMode || 'free') || (existing.configCategory || null) !== (payload.configCategory || null))) {
+        return 'This column already has a different definition. Use its original label and type when retrying setup.';
+      }
+      return '';
+    },
+
+    async submitProjectColumn() {
+      if (this.isProcessing || this.isPageLoading) return;
+      // Settings describe the input control; physical column types stay fixed.
+      const payload = {
+        columnName: this.projectColumnForm.columnName.trim(),
+        label: this.projectColumnForm.label.trim(),
+        type: this.projectColumnForm.type,
+        inputMode: this.projectColumnForm.type === 'text' ? this.projectColumnForm.inputMode || 'free' : 'free',
+        configCategory: null
+      };
+      if (payload.inputMode === 'dropdown') payload.configCategory = this.projectColumnNewCategory
+        ? this.projectColumnCategoryName.trim().toUpperCase().replace(/\s+/g, '_') : (this.projectColumnForm.configCategory || '').trim();
+      this.projectColumnFormError = this.validateProjectColumn(payload);
+      if (this.projectColumnFormError) return;
+      this.isProcessing = true;
+      this.processingMessage = `${this.isEditingProjectColumn ? 'Updating settings for' : this.isRetryingProjectColumn ? 'Completing setup for' : 'Adding'} ${payload.label}...`;
+      try {
+        const editing = this.isEditingProjectColumn;
+        const body = editing ? { label: payload.label, inputMode: payload.inputMode, configCategory: payload.configCategory } : payload;
+        const response = await this.apiFetch(`${this.apiBaseUrl}/api/admin/project-fields${editing ? '/' + encodeURIComponent(payload.columnName) : ''}`, {
+          method: editing ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await this.projectColumnResponse(response, 'Failed to add the project column. Please retry.');
+        const refreshed = await this.fetchProjectColumns();
+        await this.fetchConfigs();
+        this.showProjectColumnModal = false;
+        this.successMessage = data.message || `${payload.label} is ready to use.`;
+        if (!refreshed) this.successMessage += ' The column list could not be refreshed. Use Refresh to load it again.';
+        this.showSuccessDialog = true;
+      } catch (err) {
+        if (err.isUnauthorized) return;
+        this.projectColumnFormError = err.message || 'Failed to add the project column. Please retry.';
+        // Setup may have reached the database before a timeout or server error.
+        // Refresh state while retaining the original form for an identical retry.
+        await this.fetchProjectColumns();
+      } finally {
+        this.isProcessing = false;
+        this.processingMessage = '';
+      }
+    }
+  }
+};
+</script>
+
+<style scoped>
+.visibility-settings { padding: 20px; background: #fff; border: 1px solid #dce4ee; border-radius: 8px; }
+.visibility-toolbar, .visibility-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.visibility-toolbar input { flex: 1; min-width: 220px; padding: 10px; border: 1px solid #c2d5ee; border-radius: 5px; }
+.visibility-group { margin: 22px 0; }
+.visibility-group h3 { color: #07254a; margin: 0 0 12px; font-size: 1rem; }
+.visibility-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.visibility-option { display: flex; align-items: center; gap: 9px; padding: 10px; background: #f4f7fb; border-radius: 5px; cursor: pointer; }
+.visibility-option input { width: auto; margin: 0; }
+.visibility-option small { display: block; color: #687b91; font-size: .75rem; }
+.visibility-actions { border-top: 1px solid #dce4ee; padding-top: 16px; margin-top: 16px; }
+/* Base Layout */
+.table-gui-page {
+  padding-bottom: 50px;
+  font-family: Arial, sans-serif;
+  background-color: #f4f6f9;
+  min-height: 100vh;
+}
+
+/* Header & Banner */
+.top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #07254a;
+  padding: 10px 20px;
+  color: white;
+}
+.left {
+  display: flex;
+  align-items: center;
+}
+.logo {
+  height: 40px;
+  margin-right: 15px;
+}
+.title {
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.home-btn,
+.logout-btn,
+.back-btn {
+  background: none;
+  color: #fff;
+  border: 2px solid #fff;
+  font-size: 1.1rem;
+  cursor: pointer;
+  font-weight: 500;
+  border-radius: 8px;
+  padding: 8px 24px;
+  transition: background 0.2s, color 0.2s, border 0.2s;
+}
+.home-btn:hover,
+.logout-btn:hover,
+.back-btn:hover {
+  background: #ffd600;
+  color: #07254a;
+  border-color: #ffd600;
+}
+
+.banner {
+  background-color: #1f5fa8;
+  color: white;
+  padding: 15px 20px;
+  font-size: 1.5rem;
+  font-weight: bold;
+  text-align: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Tabs Architecture */
+.tabs-container {
+  display: flex;
+  background: white;
+  border-bottom: 2px solid #e0e6ed;
+  padding: 0 20px;
+}
+.tab-btn {
+  background: none;
+  border: none;
+  padding: 16px 24px;
+  font-size: 1.05rem;
+  font-weight: bold;
+  color: #6c757d;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  transition: color 0.2s, border-color 0.2s;
+}
+.tab-btn:hover {
+  color: #07254a;
+}
+.tab-btn.active {
+  color: #07254a;
+  border-bottom-color: #ffd600;
+}
+
+/* Tables Section */
+.table-section {
+  padding: 0 20px;
+}
+
+.no-data-message {
+  text-align: center;
+  color: #666;
+  font-size: 1.1rem;
+  padding: 30px;
+  background-color: #fff;
+  border-radius: 8px;
+  border: 1px solid #e0e6ed;
+}
+
+/* Inline Edit Tooltips and CSS */
+.editable-cell {
+  cursor: pointer;
+  border: 1px dashed transparent;
+  border-radius: 4px;
+  transition: all 0.2s ease-in-out;
+  display: inline-block;
+  min-width: 100px;
+  min-height: 25px;
+  padding: 4px;
+  box-sizing: border-box;
+}
+
+.editable-cell:hover {
+  border-color: #1f5fa8;
+  background-color: #f0f4f8;
+}
+
+.inline-input {
+  display: block;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 2px solid #1f5fa8;
+  border-radius: 4px;
+  outline: none;
+  font-family: inherit;
+  font-size: inherit;
+  background-color: #fff;
+  box-shadow: 0 0 5px rgba(31, 95, 168, 0.2);
+}
+
+/* Role Badges */
+.status-badge {
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: bold;
+  display: inline-block;
+}
+.role-pending { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+.role-viewer { background-color: #e2e3e5; color: #383d41; border: 1px solid #d6d8db; }
+.role-user { background-color: #cce5ff; color: #004085; border: 1px solid #b8daff; }
+.role-admin { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+
+/* Config Controls */
+.config-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  background: white;
+  padding: 16px 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e0e6ed;
+  margin-bottom: 16px;
+}
+.category-select {
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1rem;
+  background-color: #fff;
+  color: #333;
+  width: 100%;
+  font-weight: bold;
+}
+.category-select:disabled {
+  background-color: #e9ecef;
+  cursor: not-allowed;
+}
+
+.primary-btn {
+  background-color: #ffd600;
+  padding: 10px 20px;
+  border-radius: 4px;
+  border: none;
+  font-weight: bold;
+  cursor: pointer;
+  color: #07254a;
+  transition: opacity 0.2s;
+}
+.primary-btn:hover {
+  opacity: 0.9;
+}
+
+/* Forms & Modals */
+.form-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 600;
+  color: #1f3b64;
+  font-size: 0.9rem;
+}
+.form-group input,
+.form-group select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background-color: white;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+.modal {
+  background: #fff;
+  padding: 24px;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.modal h3 {
+  margin-top: 0;
+  color: #07254a;
+  border-bottom: 2px solid #eee;
+  padding-bottom: 10px;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+  border-top: 2px solid #eee;
+  padding-top: 16px;
+}
+.formButton {
+  background-color: #28a745;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  font-weight: bold;
+  cursor: pointer;
+}
+.cancel {
+  background-color: #6c757d;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  font-weight: bold;
+  cursor: pointer;
+}
+.confirmationmessage {
+  background: #fff;
+  padding: 24px 32px;
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.15);
+  min-width: 380px;
+  text-align: center;
+}
+
+/* Loaders */
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: rgba(7, 37, 74, 0.45);
+}
+.loading-box {
+  text-align: center;
+  background: #fff;
+  padding: 24px 32px;
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.15);
+  min-width: 380px;
+}
+.spinner {
+  width: 42px;
+  height: 42px;
+  border: 4px solid #ddd;
+  border-top: 4px solid #1f5fa8;
+  border-radius: 50%;
+  margin: 0 auto 12px;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-subtext { margin-top: 8px; font-size: 0.92rem; color: #666; }
+.loading-bar-wrapper { width: 320px; height: 12px; background: #e7edf5; border-radius: 999px; overflow: hidden; margin: 16px auto 0; position: relative; }
+.loading-bar-indeterminate { width: 40%; height: 100%; position: absolute; left: -40%; top: 0; border-radius: 999px; background: linear-gradient(90deg, #1f5fa8, #4da3ff, #1f5fa8); animation: loading-bar-slide 1.15s ease-in-out infinite; }
+@keyframes loading-bar-slide { 0% { left: -40%; } 100% { left: 100%; } }
+
+/* Vue Good Table Overrides */
+:deep(.vgt-table th) { white-space: nowrap; font-size: 0.9rem; background-color: #f8f9fb; }
+:deep(.vgt-table td) { font-size: 0.95rem; }
+
+/* Project Column Management */
+.tabs-container { flex-wrap: wrap; }
+button:disabled { opacity: 0.55; cursor: not-allowed; }
+.project-columns-section { padding-top: 20px; }
+.project-column-controls { align-items: center; gap: 20px; }
+.project-column-intro h2 { margin: 0 0 8px; font-size: 1.15rem; color: #07254a; }
+.project-column-intro p { margin: 6px 0 0; color: #334b66; line-height: 1.5; }
+.column-control-actions { display: flex; gap: 12px; flex-wrap: wrap; flex-shrink: 0; }
+.secondary-btn {
+  padding: 9px 16px;
+  background: white;
+  border: 1px solid #1f5fa8;
+  border-radius: 4px;
+  color: #1f5fa8;
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.secondary-btn:hover:not(:disabled) { background: #edf4fc; }
+.field-help { color: #62758a; font-size: 0.85rem; line-height: 1.5; }
+.project-column-intro .field-help { color: #62758a; }
+.column-table-note { margin: 14px 0; }
+.project-columns-table { overflow-x: auto; }
+.column-ready { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+.column-pending { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+.column-state-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.column-setup-error { color: #8b3a36; max-width: 300px; overflow-wrap: anywhere; }
+.retry-column-btn { white-space: nowrap; font-size: 0.85rem; }
+.column-loading { padding: 30px; text-align: center; border: 1px solid #e0e6ed; border-radius: 8px; background: white; color: #334b66; }
+.column-error-panel { padding: 18px 20px; border: 1px solid #efc4c4; border-radius: 8px; background: #fff6f6; color: #8b2525; }
+.column-error-panel p { margin: 8px 0 16px; overflow-wrap: anywhere; }
+.column-form-group { margin-bottom: 18px; }
+.column-form-group .field-help { margin: 6px 0 0; }
+.column-form-group input:disabled, .column-form-group select:disabled { background: #f1f3f6; color: #53677d; }
+.project-column-modal { max-height: calc(100vh - 48px); overflow-y: auto; box-sizing: border-box; }
+.column-form-group input[type="checkbox"] { width: auto; margin-right: 8px; }
+.column-preview { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border: 1px solid #d4e0ef; border-radius: 6px; background: #f4f8fd; color: #07254a; overflow-wrap: anywhere; }
+.column-preview span { color: #53677d; font-size: 0.85rem; }
+.column-form-error { margin: 14px 0 0; color: #a52828; font-size: 0.9rem; line-height: 1.5; overflow-wrap: anywhere; }
+
+@media (max-width: 768px) {
+  .top-bar { align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+  .title { font-size: 1rem; }
+  .topbar-actions { gap: 8px; flex-wrap: wrap; }
+  .home-btn, .logout-btn, .back-btn { font-size: 0.95rem; padding: 7px 14px; }
+  .tabs-container { padding: 0 12px; }
+  .tab-btn { padding: 14px 12px; font-size: 0.95rem; }
+  .table-section { padding-left: 12px; padding-right: 12px; }
+  .project-column-controls { align-items: flex-start; flex-direction: column; }
+  .column-control-actions { width: 100%; }
+  .column-control-actions button { flex: 1; }
+  .confirmationmessage, .loading-box { min-width: 0; width: min(380px, calc(100vw - 80px)); box-sizing: border-box; }
+  .loading-bar-wrapper { width: 100%; }
+  .modal-actions { flex-wrap: wrap; }
+}
+</style>
