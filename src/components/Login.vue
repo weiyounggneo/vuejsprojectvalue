@@ -3,13 +3,13 @@
     <div class="login-left">
       <div class="logo-title">
         <img src="@/assets/st-logo.png" alt="ST Logo" class="logo" />
-        <span class="title">Project Value Calculation</span>
+        <span class="title">AI@BEM Portal</span>
       </div>
 
       <div class="center-icon-wrapper">
         <img
           src="@/assets/Transparent_WHITE.png"
-          alt="Project Value Calculation"
+          alt="MDS — Manufacturing Data Science"
           class="center-icon"
         />
       </div>
@@ -49,7 +49,7 @@
 
         <!-- NEW: About Application Link -->
         <div class="about-link-container">
-          <a href="#" @click.prevent="showAboutModal = true" class="about-link">About this</a>
+          <a href="#" @click.prevent="showAboutModal = true" class="about-link">About AI@BEM Portal</a>
         </div>
       </form>
     </div>
@@ -57,16 +57,16 @@
     <!-- NEW: About Application Modal -->
     <div v-if="showAboutModal" class="modal-overlay">
       <div class="modal about-modal">
-        <h3>About Project Value Entry</h3>
+        <h3>About AI@BEM Portal</h3>
         
         <div class="about-content">
           <p class="team-credit"><strong>Developed by the MDS Maintenance Team</strong></p>
           
-          <p><strong>Our Purpose:</strong> This application was created to replace manual spreadsheet tracking with a centralized, secure, and user-friendly platform for managing project KPIs.</p>
+          <p><strong>Our Purpose:</strong> AI@BEM Portal brings project records, yearly savings, KPIs, milestones and portfolio visualisations into one central workspace, replacing manual spreadsheet tracking.</p>
           
           <h4>System Architecture & Data Flow</h4>
           <ul class="architecture-list">
-            <li><strong>The Interface (GUI):</strong> This web application provides a strict, validated environment to input and update weekly KPI metrics.</li>
+            <li><strong>The Interface (GUI):</strong> AI@BEM Portal provides a validated environment to maintain project details, cumulative yearly savings, KPIs and milestones, and review portfolio dashboards.</li>
             <li><strong>The Central Database:</strong> Every update made through this GUI is instantly saved to a secure, centralized MariaDB database, establishing our single source of truth.</li>
             <li><strong>Spotfire Analytics:</strong> TIBCO Spotfire connects directly to this exact same database. This ensures that all analytical dashboards always reflect the latest live data entered here, with zero manual data transfer required.</li>
           </ul>

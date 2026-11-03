@@ -6,13 +6,13 @@
       <div class="login-left">
         <div class="logo-title">
           <img src="@/assets/st-logo.png" alt="ST Logo" class="logo" />
-          <span class="title">BEM Application Portal</span>
+          <span class="title">AI@BEM Portal</span>
         </div>
 
         <div class="center-icon-wrapper">
           <img
             src="@/assets/Transparent_WHITE.png"
-            alt="Project Value Calculation"
+            alt="MDS — Manufacturing Data Science"
             class="center-icon"
           />
         </div>
@@ -24,10 +24,10 @@
 
           <!-- IF THEY ARE APPROVED (Viewer, User, Admin) -->
           <div v-if="hasAccess" style="width: 100%;">
-            <p class="subtitle">Please select an option below.</p>
+            <p class="subtitle">Open AI@BEM Portal to manage projects and explore portfolio performance.</p>
 
             <button class="landing-btn" @click="goToManagerDashboard">
-              AI@BEM Tracking
+              AI@BEM Portal
             </button>
 
             <!-- ONLY ADMINS SEE THE CONFIG/USER MANAGEMENT PAGE -->
@@ -43,7 +43,7 @@
           <!-- IF THEY ARE PENDING -->
           <div v-else class="pending-notice">
             <p>Your account is currently <strong>Pending</strong>.</p>
-            <p>Please contact your System Administrator to request 'Viewer' or 'User' privileges to access the BEM dashboards.</p>
+            <p>Please contact your System Administrator to request 'Viewer' or 'User' privileges to access AI@BEM Portal.</p>
           </div>
 
         </div>

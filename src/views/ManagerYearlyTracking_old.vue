@@ -23,8 +23,8 @@
       <div class="left">
         <img src="@/assets/st-logo.png" alt="ST Logo" class="logo" />
         <span class="title">
-          Project Value Calculation <br />
-          AI@BEM Project Tracking List
+          AI@BEM Portal <br />
+          Project Tracking
         </span>
       </div>
 
@@ -1835,7 +1835,7 @@ export default {
         
         const opt = {
           margin:       0,
-          filename:     this.activeTab === 'analytics' ? 'Portfolio_Overview_Dashboard.pdf' : 'Project_Timeline_Dashboard.pdf',
+          filename:     this.activeTab === 'analytics' ? 'AI_BEM_Portal_Portfolio_Overview.pdf' : 'AI_BEM_Portal_Project_Timeline.pdf',
           image:        { type: 'jpeg', quality: 1 },
           html2canvas:  { 
             scale: 2, 
