@@ -24,7 +24,7 @@
       <div class="left">
         <img src="@/assets/st-logo.png" alt="ST Logo" class="logo" />
         <span class="title">
-          Project Value Calculation:<br />
+          AI@BEM Portal<br />
           System Administration
         </span>
       </div>

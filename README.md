@@ -1,10 +1,12 @@
-# AI BEM — Project Portfolio and Value Management
+# AI@BEM Portal — Project Portfolio and Value Management
 
-A Vue 3 application for maintaining project records, tracking cumulative yearly savings and milestones, reviewing portfolio performance, and configuring shared dashboards without routine developer changes.
+AI@BEM Portal is a Vue 3 application for maintaining project records, tracking cumulative yearly savings and milestones, reviewing portfolio performance, and configuring shared dashboards without routine developer changes.
 
 The application combines **Manager Yearly Tracking**, **Portfolio Overview**, **Visualisation Management**, administrative configuration, and a separate **Project Value** interface for monthly KPI records and dated unit-cost rates.
 
-**Documentation updated: 30 October 2026.** This README reflects the inspected manager/backend source, the modular frontend, and visualisation enhancements completed through 29 October 2026. It supplements the earlier [technical documentation](AI_BEM_Technical_Documentation.docx), dated 14 October 2026.
+**Documentation updated: 3 November 2026.** This README reflects the inspected manager/backend source, the modular frontend, visualisation enhancements completed through 29 October 2026, and the AI@BEM Portal branding update. It supplements the earlier [technical documentation](AI_BEM_Technical_Documentation.docx), dated 14 October 2026.
+
+The application name is **AI@BEM Portal** across login, landing, dashboards and browser tabs. Functional names such as Project Tracking, Portfolio Overview, System Administration and Project Value remain descriptive module labels. Existing route paths, API endpoints, database names, storage keys and package identifiers are unchanged.
 
 > The supplied feature bundles extend an existing application and BEM database. They are not a replacement for the complete repository, dependency lockfile, original core database schema, or production configuration. In particular, the manager-focused `server.js` does not implement the separate Project Value, Project Master and unit-cost APIs.
 
